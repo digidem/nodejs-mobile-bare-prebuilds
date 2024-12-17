@@ -53,26 +53,18 @@ on:
 
 env:
   NODE_VERSION: 18
-  NDK_VERSION: r26
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
-    name: ${{ inputs.platform }}-${{ inputs.arch }}
+    name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }})
     outputs:
       version: ${{ steps.parse-module-version.outputs.version }}
       run_id: ${{ github.run_id }}
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup NDK
-        uses: nttld/setup-ndk@v1
-        id: setup-ndk
-        with:
-          ndk-version: ${{ env.NDK_VERSION }} # https://github.com/android/ndk/wiki/Unsupported-Downloads#r24
-          add-to-path: false
 
       - name: Use Node.js ${{ env.NODE_VERSION }}
         uses: actions/setup-node@v4
@@ -99,8 +91,6 @@ jobs:
 
       - name: Generate
         working-directory: ./package
-        env:
-          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: bare-make generate --platform ${{ inputs.platform }} --arch ${{ inputs.arch }}
 
       - name: Build
