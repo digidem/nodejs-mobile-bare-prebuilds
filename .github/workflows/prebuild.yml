@@ -1,0 +1,118 @@
+name: Generate prebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_name:
+        type: string
+        description: "The name of the module to prebuild"
+        required: true
+      platform:
+        type: string
+        description: "The platform to prebuild for"
+        required: true
+        default: "android"
+      arch:
+        type: string
+        description: "The architecture to prebuild for"
+        required: true
+        default: "arm64"
+      module_version:
+        type: string
+        description: "The version of the module to prebuild"
+        required: false
+        default: "latest"
+  workflow_call:
+    inputs:
+      module_name:
+        type: string
+        description: "The name of the module to prebuild"
+        required: true
+      platform:
+        type: string
+        description: "The platform to prebuild for"
+        required: true
+        default: "android"
+      arch:
+        type: string
+        description: "The architecture to prebuild for"
+        required: true
+        default: "arm64"
+      module_version:
+        type: string
+        description: "The version of the module to prebuild"
+        required: false
+        default: "latest"
+    outputs:
+      version:
+        description: "The version of the module"
+        value: ${{ jobs.build.outputs.version }}
+      run_id:
+        description: "The run id of the build"
+        value: ${{ jobs.build.outputs.run_id }}
+
+env:
+  NODE_VERSION: 18
+  NDK_VERSION: r26
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    timeout-minutes: 10
+    name: ${{ inputs.platform }}-${{ inputs.arch }}
+    outputs:
+      version: ${{ steps.parse-module-version.outputs.version }}
+      run_id: ${{ github.run_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: ${{ env.NDK_VERSION }} # https://github.com/android/ndk/wiki/Unsupported-Downloads#r24
+          add-to-path: false
+
+      - name: Use Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Download npm package and unpack
+        run: npm pack ${{ inputs.module_name }}@${{ inputs.module_version }} | xargs tar -zxvf
+
+      - name: Parse module version
+        id: parse-module-version
+        working-directory: ./package
+        run: echo version=$(jq -r .version package.json) >> $GITHUB_OUTPUT
+
+      - run: npm install -g bare-make
+
+      - name: Install deps for package
+        working-directory: ./package
+        run: npm install
+
+      - name: Install patched cmake-napi
+        working-directory: ./package
+        run: npm install cmake-napi@github:digidem/cmake-napi-nodejs-mobile
+
+      - name: Generate
+        working-directory: ./package
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: bare-make generate --platform ${{ inputs.platform }} --arch ${{ inputs.arch }}
+
+      - name: Build
+        working-directory: ./package
+        run: bare-make build
+
+      - name: Install
+        working-directory: ./package
+        run: bare-make install
+
+      - name: Upload original prebuild artifacts # mostly for debugging purposes
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.platform }}-${{ inputs.arch }}
+          path: ./package/prebuilds/${{ inputs.platform }}-${{ inputs.arch }}/*.node
