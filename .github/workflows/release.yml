@@ -20,7 +20,7 @@ jobs:
           mkdir -p artifacts
           for folder in prebuilds/*/; do
             folder_name=$(basename "$folder")
-            tar -czvf "artifacts/${folder_name}.tar.gz" -C "prebuilds/${folder_name}"
+            tar -czvf "artifacts/${folder_name}.tar.gz" -C "prebuilds/${folder_name}" .
           done
 
       - name: Create GitHub Release
