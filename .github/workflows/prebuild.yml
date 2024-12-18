@@ -8,14 +8,20 @@ on:
         description: "The name of the module to prebuild"
         required: true
       platform:
-        type: string
+        type: choice
         description: "The platform to prebuild for"
         required: true
+        options:
+          - "android"
         default: "android"
       arch:
-        type: string
+        type: choice
         description: "The architecture to prebuild for"
         required: true
+        options:
+          - "arm64"
+          - "x64"
+          - "arm"
         default: "arm64"
       module_version:
         type: string
@@ -44,12 +50,9 @@ on:
         required: false
         default: "latest"
     outputs:
-      version:
+      module_version:
         description: "The version of the module"
-        value: ${{ jobs.build.outputs.version }}
-      run_id:
-        description: "The run id of the build"
-        value: ${{ jobs.build.outputs.run_id }}
+        value: ${{ jobs.build.outputs.module_version }}
 
 env:
   NODE_VERSION: 18
@@ -60,8 +63,7 @@ jobs:
     timeout-minutes: 10
     name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }})
     outputs:
-      version: ${{ steps.parse-module-version.outputs.version }}
-      run_id: ${{ github.run_id }}
+      module_version: ${{ steps.parse-module-version.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -104,5 +106,5 @@ jobs:
       - name: Upload original prebuild artifacts # mostly for debugging purposes
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.platform }}-${{ inputs.arch }}
+          name: ${{ inputs.module_name }}-${{ steps.parse-module-version.outputs.version }}-${{ inputs.platform }}-${{ inputs.arch }}
           path: ./package/prebuilds/${{ inputs.platform }}-${{ inputs.arch }}/*.node
