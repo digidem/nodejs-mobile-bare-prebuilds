@@ -28,6 +28,10 @@ on:
         description: "The version of the module to prebuild"
         required: false
         default: "latest"
+      patch_file:
+        type: string
+        description: "Path to patch file to apply to the module (optional)"
+        required: false
   workflow_call:
     inputs:
       module_name:
@@ -49,6 +53,10 @@ on:
         description: "The version of the module to prebuild"
         required: false
         default: "latest"
+      patch_file:
+        type: string
+        description: "Path to patch file to apply to the module (optional)"
+        required: false
     outputs:
       module_version:
         description: "The version of the module"
@@ -75,6 +83,18 @@ jobs:
 
       - name: Download npm package and unpack
         run: npm pack ${{ inputs.module_name }}@${{ inputs.module_version }} | xargs tar -zxvf
+
+      - name: Apply patch if provided
+        if: ${{ inputs.patch_file }}
+        run: |
+          if [ -f "${{ inputs.patch_file }}" ]; then
+            echo "Applying patch: ${{ inputs.patch_file }}"
+            cd package
+            patch -p1 < ../${{ inputs.patch_file }}
+          else
+            echo "Patch file not found: ${{ inputs.patch_file }}"
+            exit 1
+          fi
 
       - name: Parse module version
         id: parse-module-version
