@@ -113,7 +113,11 @@ jobs:
 
       - name: Generate
         working-directory: ./package
-        run: bare-make generate --platform ${{ inputs.platform }} --arch ${{ inputs.arch }}
+        run: |
+          bare-make generate \
+            --platform ${{ inputs.platform }} \
+            --arch ${{ inputs.arch }} \
+            -D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
 
       - name: Build
         working-directory: ./package
