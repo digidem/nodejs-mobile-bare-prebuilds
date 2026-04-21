@@ -32,6 +32,15 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
+      runner:
+        type: choice
+        description: "The runner to use for the build"
+        required: true
+        options:
+          - "ubuntu-22.04"
+          - "macos-latest"
+          - "windows-latest"
+        default: "ubuntu-22.04"
   workflow_call:
     inputs:
       module_name:
@@ -57,78 +66,31 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
+      runner:
+        type: string
+        description: "The runner to use for the build"
+        required: true
+        default: "ubuntu-22.04"
     outputs:
       module_version:
         description: "The version of the module"
         value: ${{ jobs.build.outputs.module_version }}
 
-env:
-  NODE_VERSION: 18
-
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
     name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }})
     outputs:
-      module_version: ${{ steps.parse-module-version.outputs.version }}
-
+      module_version: ${{ steps.prebuild.outputs.module_version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Use Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: ./.github/actions/prebuild
+        id: prebuild
         with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Download npm package and unpack
-        run: npm pack ${{ inputs.module_name }}@${{ inputs.module_version }} | xargs tar -zxvf
-
-      - name: Apply patch if provided
-        if: ${{ inputs.patch_file }}
-        run: |
-          if [ -f "${{ inputs.patch_file }}" ]; then
-            echo "Applying patch: ${{ inputs.patch_file }}"
-            cd package
-            patch -p1 < ../${{ inputs.patch_file }}
-          else
-            echo "Patch file not found: ${{ inputs.patch_file }}"
-            exit 1
-          fi
-
-      - name: Parse module version
-        id: parse-module-version
-        working-directory: ./package
-        run: echo version=$(jq -r .version package.json) >> $GITHUB_OUTPUT
-
-      - run: npm install -g bare-make
-
-      - name: Install deps for package
-        working-directory: ./package
-        run: npm install
-
-      - name: Install patched cmake-napi
-        working-directory: ./package
-        run: npm install cmake-napi@github:digidem/cmake-napi-nodejs-mobile
-
-      - name: Generate
-        working-directory: ./package
-        run: |
-          bare-make generate \
-            --platform ${{ inputs.platform }} \
-            --arch ${{ inputs.arch }} \
-            -D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
-
-      - name: Build
-        working-directory: ./package
-        run: bare-make build
-
-      - name: Install
-        working-directory: ./package
-        run: bare-make install
-
-      - name: Upload original prebuild artifacts # mostly for debugging purposes
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ inputs.module_name }}-${{ steps.parse-module-version.outputs.version }}-${{ inputs.platform }}-${{ inputs.arch }}
-          path: ./package/prebuilds/${{ inputs.platform }}-${{ inputs.arch }}/*.node
+          module_name: ${{ inputs.module_name }}
+          platform: ${{ inputs.platform }}
+          arch: ${{ inputs.arch }}
+          module_version: ${{ inputs.module_version }}
+          patch_file: ${{ inputs.patch_file }}
