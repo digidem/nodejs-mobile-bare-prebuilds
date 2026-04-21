@@ -95,10 +95,16 @@ runs:
       shell: bash
       working-directory: ./package
       run: |
+        extra_args=()
+        case "${{ inputs.platform }}" in
+          android|linux)
+            extra_args+=(-D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384")
+            ;;
+        esac
         bare-make generate \
           --platform ${{ inputs.platform }} \
           --arch ${{ inputs.arch }} \
-          -D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384"
+          "${extra_args[@]}"
 
     - name: Build
       shell: bash
