@@ -21,11 +21,17 @@ inputs:
     description: "The version of the module to prebuild"
     required: false
     default: "latest"
-  patch_file:
-    description:
-      "Path to patch file to apply to the module (resolved relative to the
-      caller's workspace)"
+  patches_dir:
+    description: |
+      Directory in the caller's workspace holding patches in the
+      patch-package convention: `<module_name>+<version>.patch`. A file
+      matching the resolved module_version is applied with `patch -p1
+      --forward` after unpack and before install. If sibling patches
+      exist for the same module at other versions but none matches, the
+      step fails loudly (typically a forgotten rename after a version
+      bump).
     required: false
+    default: "patches"
   node_version:
     description: "Node.js version to use"
     required: false
@@ -89,24 +95,47 @@ runs:
         npm pack ${{ inputs.module_name }}@${{ inputs.module_version }} | xargs
         tar -zxvf
 
-    - name: Apply patch if provided
-      if: ${{ inputs.patch_file }}
-      shell: bash
-      run: |
-        if [ -f "${{ inputs.patch_file }}" ]; then
-          echo "Applying patch: ${{ inputs.patch_file }}"
-          cd package
-          patch -p1 < ../${{ inputs.patch_file }}
-        else
-          echo "Patch file not found: ${{ inputs.patch_file }}"
-          exit 1
-        fi
-
     - name: Parse module version
       id: parse-module-version
       shell: bash
       working-directory: ./package
       run: echo version=$(jq -r .version package.json) >> $GITHUB_OUTPUT
+
+    - name: Apply version-pinned patch (if one matches)
+      shell: bash
+      working-directory: ./package
+      env:
+        PATCHES_DIR: ${{ inputs.patches_dir }}
+        MODULE_NAME: ${{ inputs.module_name }}
+        VERSION: ${{ steps.parse-module-version.outputs.version }}
+      run: |
+        set -eu
+        # patch-package convention: patches/<module>+<version>.patch.
+        # The caller's repo is checked out at $GITHUB_WORKSPACE so
+        # PATCHES_DIR resolves there, not inside ./package.
+        patches_root="${GITHUB_WORKSPACE}/${PATCHES_DIR}"
+        match="${patches_root}/${MODULE_NAME}+${VERSION}.patch"
+
+        if [ -f "$match" ]; then
+          echo "Applying patch: ${match}"
+          # --forward + no backup = clean failure on a bad patch instead
+          # of .rej/.orig litter and a false-positive exit 0.
+          patch -p1 --forward --no-backup-if-mismatch < "$match"
+          exit 0
+        fi
+
+        # No exact match — if the caller maintains patches for this
+        # module at other versions, fail loudly. Nearly always a typo
+        # in the filename or a forgotten rename after bumping
+        # module_version.
+        if compgen -G "${patches_root}/${MODULE_NAME}+*.patch" >/dev/null; then
+          echo "::error::No patch matches ${MODULE_NAME}+${VERSION}.patch in ${PATCHES_DIR}/, but other versions exist. Add a patch for ${VERSION} or remove the stale ones."
+          echo "Available patches:"
+          ls "${patches_root}/${MODULE_NAME}"+*.patch
+          exit 1
+        fi
+
+        echo "No patch to apply (no ${MODULE_NAME}+*.patch files in ${PATCHES_DIR}/)."
 
     - name: Install bare-make
       shell: bash
