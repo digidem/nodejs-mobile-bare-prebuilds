@@ -8,38 +8,45 @@
 set -euo pipefail
 
 APK="${GITHUB_WORKSPACE}/.nodejs-mobile-bare-prebuilds/test-harness/android/app/build/outputs/apk/debug/app-debug.apk"
+TIMEOUT_SECONDS=1200
 
 adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
 adb install -r -g "$APK"
 adb logcat -c
 
-# Launch the activity. The app pumps node's stdout/stderr to logcat
-# tag NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done.
+# Launch the activity. The app pumps node's stdout/stderr to logcat tag
+# NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done.
 adb shell am start -W -n com.digidem.nodejstest/.TestActivity
 
-# Stream logcat; awk echoes each line (so TAP lands in the workflow
-# log) and captures the exit code from the sentinel.
-: > /tmp/node_exit
-set +e
-timeout 1200 adb logcat -v raw -s NODEJS-MOBILE:V | awk '
-  { print }
-  /__NODE_EXIT__:/ {
-    if (match($0, /__NODE_EXIT__:-?[0-9]+/)) {
-      s = substr($0, RSTART, RLENGTH)
-      sub(/^__NODE_EXIT__:/, "", s)
-      print "NODE_EXIT_CODE=" s > "/tmp/node_exit"
-      close("/tmp/node_exit")
-      exit
-    }
-  }
-'
-set -e
+# Run logcat as a coprocess so we can kill it explicitly once the sentinel
+# is seen. (A plain `adb logcat | awk` pipeline hangs because adb only
+# notices the pipe has closed when it next tries to write, and no further
+# lines are coming once the app has exited.)
+coproc LOGCAT { adb logcat -v raw -s NODEJS-MOBILE:V; }
 
-if [ ! -s /tmp/node_exit ]; then
-  echo "::error::Did not observe __NODE_EXIT__ sentinel within timeout"
+EXIT_CODE=""
+SECONDS=0
+while (( SECONDS < TIMEOUT_SECONDS )); do
+  # Per-read timeout keeps the outer timeout check live even when logcat
+  # is silent (app crashed without emitting the sentinel, etc.).
+  if IFS= read -r -u "${LOGCAT[0]}" -t 10 line; then
+    printf '%s\n' "$line"
+    case "$line" in
+      *__NODE_EXIT__:*)
+        EXIT_CODE="${line##*__NODE_EXIT__:}"
+        break
+        ;;
+    esac
+  fi
+done
+
+kill "${LOGCAT_PID}" 2>/dev/null || true
+wait "${LOGCAT_PID}" 2>/dev/null || true
+
+if [ -z "$EXIT_CODE" ]; then
+  echo "::error::Did not observe __NODE_EXIT__ sentinel within ${TIMEOUT_SECONDS}s"
   exit 1
 fi
-# shellcheck disable=SC1091
-. /tmp/node_exit
-echo "Node process exited with code ${NODE_EXIT_CODE}"
-exit "${NODE_EXIT_CODE}"
+
+echo "Node process exited with code ${EXIT_CODE}"
+exit "${EXIT_CODE}"

@@ -3,8 +3,12 @@ description: |
   Parses `module_spec` into name + version, downloads the prebuild artifact,
   installs the module under test into a `nodejs-project/` tree, drops the
   prebuilt `.node` files into `node_modules/<module>/prebuilds/<target>/`,
-  and places a `main.js` entry point (either the caller's test script, or a
-  generated require() smoke test from default-smoke-test.js).
+  and places a `main.js` entry point.
+
+  Three test-runner modes (selected by `test_runner`):
+  - 'smoke'  (default): generated test that just `require()`s the module.
+  - 'module': runs the module's own `test/*.js` via brittle.
+  - 'custom': copies the caller's `test_script` in as test.js.
 
   Requires `node`/`npm` on PATH — add an `actions/setup-node` step before
   calling this action.
@@ -32,10 +36,18 @@ inputs:
       '<module_name>-<version>-<target><artifact_suffix>'.
     required: false
     default: ""
+  test_runner:
+    description: |
+      One of 'smoke' (default), 'module', or 'custom'.
+      - 'smoke':  auto-generated test that just require()s the module.
+      - 'module': runs the module's own test/*.js (requires brittle).
+      - 'custom': uses the file pointed to by `test_script`.
+    required: false
+    default: "smoke"
   test_script:
     description: |
-      Path to the test script (relative to $GITHUB_WORKSPACE). If empty, a
-      default smoke test is generated from default-smoke-test.js.
+      Path to a caller-provided test script (relative to $GITHUB_WORKSPACE).
+      Only used when test_runner is 'custom'.
     required: false
     default: ""
   nodejs_project_dir:
@@ -82,6 +94,7 @@ runs:
         MODULE_VERSION: ${{ steps.spec.outputs.module_version }}
         TARGET: ${{ inputs.target }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
+        TEST_RUNNER: ${{ inputs.test_runner }}
       run: |
         set -euo pipefail
         mkdir -p "$NODEDIR"
@@ -90,6 +103,12 @@ runs:
           npm init -y >/dev/null
           npm install --ignore-scripts --no-audit --no-fund \
             "${MODULE_NAME}@${MODULE_VERSION}"
+          # The module's own test files are in the npm tarball but brittle
+          # (a devDep) isn't pulled in by `npm install <pkg>`. Install it
+          # alongside when we're going to run the module's tests.
+          if [ "$TEST_RUNNER" = "module" ]; then
+            npm install --ignore-scripts --no-audit --no-fund --no-save brittle
+          fi
         )
         dst="$NODEDIR/node_modules/${MODULE_NAME}/prebuilds/${TARGET}"
         mkdir -p "$dst"
@@ -101,25 +120,43 @@ runs:
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        TEST_RUNNER: ${{ inputs.test_runner }}
         TEST_SCRIPT: ${{ inputs.test_script }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
-        WRAPPER: ${{ github.action_path }}/wrapper.js
-        SMOKE_TEMPLATE: ${{ github.action_path }}/default-smoke-test.js
+        ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
         # main.js is always the wrapper: it installs the exit-sentinel handler
         # and then delegates to ./test.js.
-        cp "$WRAPPER" "$NODEDIR/main.js"
+        cp "$ACTION_PATH/wrapper.js" "$NODEDIR/main.js"
 
-        # test.js is either the caller's script or a generated smoke test.
-        if [ -z "$TEST_SCRIPT" ]; then
-          echo "No test_script provided; using default smoke-test template."
-          esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
-          sed "s/__MODULE_NAME__/$esc/g" "$SMOKE_TEMPLATE" > "$NODEDIR/test.js"
-        elif [ ! -f "$TEST_SCRIPT" ]; then
-          echo "::error::test_script '$TEST_SCRIPT' not found in caller repo"
-          exit 1
-        else
-          cp "$TEST_SCRIPT" "$NODEDIR/test.js"
-        fi
-        echo "main.js (wrapper) + test.js placed under $NODEDIR/"
+        case "$TEST_RUNNER" in
+          smoke)
+            template="$ACTION_PATH/default-smoke-test.js"
+            esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
+            sed "s/__MODULE_NAME__/$esc/g" "$template" > "$NODEDIR/test.js"
+            echo "test_runner=smoke: generated require() smoke test."
+            ;;
+          module)
+            template="$ACTION_PATH/module-tests-runner.js"
+            esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
+            sed "s/__MODULE_NAME__/$esc/g" "$template" > "$NODEDIR/test.js"
+            echo "test_runner=module: running ${MODULE_NAME}'s own test/*.js via brittle."
+            ;;
+          custom)
+            if [ -z "$TEST_SCRIPT" ]; then
+              echo "::error::test_runner=custom requires a non-empty test_script input."
+              exit 1
+            fi
+            if [ ! -f "$TEST_SCRIPT" ]; then
+              echo "::error::test_script '$TEST_SCRIPT' not found in caller repo"
+              exit 1
+            fi
+            cp "$TEST_SCRIPT" "$NODEDIR/test.js"
+            echo "test_runner=custom: using ${TEST_SCRIPT}."
+            ;;
+          *)
+            echo "::error::Unknown test_runner '$TEST_RUNNER' (expected 'smoke', 'module', or 'custom')."
+            exit 1
+            ;;
+        esac

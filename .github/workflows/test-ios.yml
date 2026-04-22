@@ -28,13 +28,20 @@ on:
           — matching the name the simulator-targeted prebuild uploads with.
         required: false
         default: ""
+      test_runner:
+        type: string
+        description: |
+          One of 'smoke' (default), 'module', or 'custom'.
+          - 'smoke':  auto-generated test that just require()s the module.
+          - 'module': runs the module's own test/*.js via brittle.
+          - 'custom': uses the file pointed to by `test_script`.
+        required: false
+        default: "smoke"
       test_script:
         type: string
         description: |
-          Path to the test script (relative to the caller repo root). The
-          script will run as the main.js inside nodejs-mobile and should emit
-          TAP on stdout. If empty (the default), a minimal script is generated
-          that just does `require('<module_name>')` as a smoke test.
+          Path to a caller-provided test script (relative to the caller repo
+          root). Only used when test_runner is 'custom'.
         required: false
         default: ""
       nodejs_mobile_version:
@@ -108,6 +115,7 @@ jobs:
           target: ${{ inputs.target }}
           artifact_suffix: "-simulator"
           artifact_name: ${{ inputs.artifact_name }}
+          test_runner: ${{ inputs.test_runner }}
           test_script: ${{ inputs.test_script }}
           nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/ios/nodejs-project
 
