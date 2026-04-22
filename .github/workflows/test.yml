@@ -35,11 +35,11 @@ on:
         description: "(Optional) path to a test script in this repo; blank uses the default require() smoke test"
         required: false
         default: ""
-      patch_file:
+      patches_dir:
         type: string
-        description: "(Optional) path to a patch file to apply to the module before building"
+        description: "(Optional) directory with <module>+<version>.patch files"
         required: false
-        default: ""
+        default: "patches"
 
 jobs:
   build-android:
@@ -50,7 +50,7 @@ jobs:
       platform: android
       arch: x64
       module_version: ${{ inputs.module_version }}
-      patch_file: ${{ inputs.patch_file }}
+      patches_dir: ${{ inputs.patches_dir }}
 
   test-android:
     if: ${{ inputs.platforms == 'both' || inputs.platforms == 'android' }}
@@ -70,7 +70,7 @@ jobs:
       arch: arm64
       simulator: true
       module_version: ${{ inputs.module_version }}
-      patch_file: ${{ inputs.patch_file }}
+      patches_dir: ${{ inputs.patches_dir }}
 
   test-ios:
     if: ${{ inputs.platforms == 'both' || inputs.platforms == 'ios' }}
