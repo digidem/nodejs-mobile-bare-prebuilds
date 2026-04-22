@@ -1,0 +1,92 @@
+name: End-to-end test (manual dispatch)
+
+# Manual wrapper that chains prebuild -> test for one or both platforms so the
+# whole pipeline can be exercised from the Actions tab without needing to call
+# these reusable workflows from another repo.
+#
+# The harness is always checked out at the same commit as this dispatch run
+# (`harness_ref: ${{ github.sha }}`), so in-flight changes to the harness or
+# the composite action are tested as-is on the triggering branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module_name:
+        type: string
+        description: "npm module to build and test (e.g. 'sodium-native')"
+        required: true
+        default: "quickbit-native"
+      module_version:
+        type: string
+        description: "Version of the module to fetch from npm"
+        required: false
+        default: "latest"
+      platforms:
+        type: choice
+        description: "Which platform(s) to run the pipeline against"
+        required: true
+        options:
+          - both
+          - android
+          - ios
+        default: both
+      test_script:
+        type: string
+        description: "(Optional) path to a test script in this repo; blank uses the default require() smoke test"
+        required: false
+        default: ""
+      patch_file:
+        type: string
+        description: "(Optional) path to a patch file to apply to the module before building"
+        required: false
+        default: ""
+
+jobs:
+  build-android:
+    if: ${{ inputs.platforms == 'both' || inputs.platforms == 'android' }}
+    uses: ./.github/workflows/prebuild.yml
+    with:
+      module_name: ${{ inputs.module_name }}
+      platform: android
+      arch: x64
+      module_version: ${{ inputs.module_version }}
+      patch_file: ${{ inputs.patch_file }}
+
+  test-android:
+    if: ${{ inputs.platforms == 'both' || inputs.platforms == 'android' }}
+    needs: build-android
+    uses: ./.github/workflows/test-android.yml
+    with:
+      module_name: ${{ inputs.module_name }}
+      module_version: ${{ needs.build-android.outputs.module_version }}
+      artifact_name: ${{ inputs.module_name }}-${{ needs.build-android.outputs.module_version }}-android-x64
+      target: android-x64
+      test_script: ${{ inputs.test_script }}
+      harness_ref: ${{ github.sha }}
+
+  build-ios:
+    if: ${{ inputs.platforms == 'both' || inputs.platforms == 'ios' }}
+    uses: ./.github/workflows/prebuild.yml
+    with:
+      module_name: ${{ inputs.module_name }}
+      platform: ios
+      arch: arm64
+      simulator: true
+      module_version: ${{ inputs.module_version }}
+      patch_file: ${{ inputs.patch_file }}
+
+  test-ios:
+    if: ${{ inputs.platforms == 'both' || inputs.platforms == 'ios' }}
+    needs: build-ios
+    uses: ./.github/workflows/test-ios.yml
+    with:
+      module_name: ${{ inputs.module_name }}
+      module_version: ${{ needs.build-ios.outputs.module_version }}
+      # Prebuild artifacts from simulator builds are named '…-ios-arm64-simulator',
+      # but the test workflow installs them under prebuilds/ios-arm64/ because
+      # at runtime nodejs-mobile reports process.platform+'-'+process.arch as
+      # 'ios-arm64' regardless of simulator vs device.
+      artifact_name: ${{ inputs.module_name }}-${{ needs.build-ios.outputs.module_version }}-ios-arm64-simulator
+      target: ios-arm64
+      test_script: ${{ inputs.test_script }}
+      harness_ref: ${{ github.sha }}

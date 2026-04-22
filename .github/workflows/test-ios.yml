@@ -1,0 +1,188 @@
+name: Test on iOS simulator
+
+on:
+  workflow_call:
+    inputs:
+      module_name:
+        type: string
+        description: "The npm module being tested (e.g. 'sodium-native')"
+        required: true
+      module_version:
+        type: string
+        description: "Version of the module to install"
+        required: true
+      artifact_name:
+        type: string
+        description: "Name of the prebuild artifact uploaded earlier in the run"
+        required: true
+      target:
+        type: string
+        description: |
+          The `prebuilds/<target>/` subfolder to install the .node file into
+          — this is what the runtime loader (require-addon / bare-addon-resolve)
+          will look for, derived from `process.platform + '-' + process.arch`.
+          On the iOS simulator this is always 'ios-arm64' (no -simulator
+          suffix), even if the prebuild was built with simulator=true.
+        required: false
+        default: "ios-arm64"
+      test_script:
+        type: string
+        description: |
+          Path to the test script (relative to the caller repo root). The
+          script will run as the main.js inside nodejs-mobile and should emit
+          TAP on stdout. If empty (the default), a minimal script is generated
+          that just does `require('<module_name>')` as a smoke test.
+        required: false
+        default: ""
+      nodejs_mobile_version:
+        type: string
+        description: "nodejs-mobile release tag to download NodeMobile.xcframework from"
+        required: false
+        default: "v18.20.4"
+      simulator_name:
+        type: string
+        description: "Name of the iOS Simulator device to boot"
+        required: false
+        default: "iPhone 15"
+      harness_ref:
+        type: string
+        description: "Ref of digidem/nodejs-mobile-bare-prebuilds to pull the harness from"
+        required: false
+        default: "main"
+
+jobs:
+  test:
+    # macos-14 / macos-latest runners are Apple Silicon (arm64) — the
+    # simulator will run arm64 code, so the matching prebuild target is
+    # ios-arm64-simulator.
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout caller repo
+        uses: actions/checkout@v4
+
+      - name: Checkout test harness
+        uses: actions/checkout@v4
+        with:
+          repository: digidem/nodejs-mobile-bare-prebuilds
+          ref: ${{ inputs.harness_ref }}
+          path: .nodejs-mobile-bare-prebuilds
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache NodeMobile xcframework
+        id: cache-nodemobile
+        uses: actions/cache@v4
+        with:
+          path: .nodejs-mobile-bare-prebuilds/test-harness/ios/NodeMobile
+          key: nodemobile-${{ inputs.nodejs_mobile_version }}
+
+      - name: Download nodejs-mobile iOS xcframework
+        if: steps.cache-nodemobile.outputs.cache-hit != 'true'
+        env:
+          NM_VERSION: ${{ inputs.nodejs_mobile_version }}
+        run: |
+          set -euo pipefail
+          harness=.nodejs-mobile-bare-prebuilds/test-harness/ios
+          tmp=$(mktemp -d)
+          url="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/${NM_VERSION}/nodejs-mobile-${NM_VERSION}-ios.zip"
+          echo "Downloading $url"
+          curl -fL "$url" -o "$tmp/ios.zip"
+          unzip -q "$tmp/ios.zip" -d "$tmp/ios"
+          # The pbxproj references `NodeMobile/NodeMobile.xcframework`; Xcode
+          # picks the right slice for the active -sdk at build time.
+          mkdir -p "$harness/NodeMobile"
+          cp -R "$tmp/ios/NodeMobile.xcframework" "$harness/NodeMobile/"
+          ls -la "$harness/NodeMobile/NodeMobile.xcframework" | head
+
+      - name: Assemble nodejs-project
+        uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/assemble-test-project
+        with:
+          module_name: ${{ inputs.module_name }}
+          module_version: ${{ inputs.module_version }}
+          artifact_name: ${{ inputs.artifact_name }}
+          target: ${{ inputs.target }}
+          test_script: ${{ inputs.test_script }}
+          nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/ios/nodejs-project
+
+      - name: Build TestHarness.app
+        working-directory: .nodejs-mobile-bare-prebuilds/test-harness/ios
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project TestHarness.xcodeproj \
+            -scheme TestHarness \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+          # Surface the built app path.
+          find build/Build/Products -maxdepth 3 -name 'TestHarness.app'
+
+      - name: Boot simulator
+        env:
+          SIM_NAME: ${{ inputs.simulator_name }}
+        run: |
+          set -euo pipefail
+          # Pick the newest runtime matching the requested device, boot it.
+          DEVICE_ID=$(xcrun simctl list devices available -j | \
+            python3 -c "
+          import json, sys, os
+          d = json.load(sys.stdin)
+          want = os.environ['SIM_NAME']
+          picks = []
+          for runtime, devs in d['devices'].items():
+            for dev in devs:
+              if dev.get('name') == want and dev.get('isAvailable'):
+                picks.append((runtime, dev['udid']))
+          picks.sort()  # newest runtime sorts last
+          if not picks:
+            sys.exit('No available simulator named ' + want)
+          print(picks[-1][1])
+          ")
+          echo "DEVICE_ID=$DEVICE_ID" >> $GITHUB_ENV
+          xcrun simctl boot "$DEVICE_ID" || true
+          xcrun simctl bootstatus "$DEVICE_ID" -b
+
+      - name: Install & launch test app, stream stdout
+        working-directory: .nodejs-mobile-bare-prebuilds/test-harness/ios
+        run: |
+          set -euo pipefail
+          APP=$(find build/Build/Products -maxdepth 3 -name 'TestHarness.app' | head -1)
+          echo "App: $APP"
+          xcrun simctl install "$DEVICE_ID" "$APP"
+
+          : > /tmp/node_exit
+          set +e
+          # --console-pty attaches a pty to the app's stdout/stderr and blocks
+          # until the app terminates. The app prints `__NODE_EXIT__:<code>`
+          # and calls exit(). The job-level timeout-minutes caps total runtime.
+          xcrun simctl launch --console-pty --terminate-running-process \
+              "$DEVICE_ID" com.digidem.nodejstest 2>&1 | awk '
+            { print }
+            /__NODE_EXIT__:/ {
+              if (match($0, /__NODE_EXIT__:-?[0-9]+/)) {
+                s = substr($0, RSTART, RLENGTH)
+                sub(/^__NODE_EXIT__:/, "", s)
+                print "NODE_EXIT_CODE=" s > "/tmp/node_exit"
+                close("/tmp/node_exit")
+                exit
+              }
+            }
+          '
+          set -e
+
+          if [ ! -s /tmp/node_exit ]; then
+            echo "::error::Did not observe __NODE_EXIT__ sentinel within timeout"
+            exit 1
+          fi
+          # shellcheck disable=SC1091
+          . /tmp/node_exit
+          echo "Node process exited with code ${NODE_EXIT_CODE}"
+          exit "${NODE_EXIT_CODE}"
