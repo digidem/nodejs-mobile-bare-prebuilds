@@ -24,6 +24,11 @@ on:
           - "x64"
           - "arm"
         default: "arm64"
+      simulator:
+        type: boolean
+        description: "Build for an iOS simulator (ios only)"
+        required: false
+        default: false
       module_version:
         type: string
         description: "The version of the module to prebuild"
@@ -58,6 +63,11 @@ on:
         description: "The architecture to prebuild for"
         required: true
         default: "arm64"
+      simulator:
+        type: boolean
+        description: "Build for an iOS simulator (ios only)"
+        required: false
+        default: false
       module_version:
         type: string
         description: "The version of the module to prebuild"
@@ -81,7 +91,7 @@ jobs:
   build:
     runs-on: ${{ inputs.runner }}
     timeout-minutes: 10
-    name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }})
+    name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }}${{ inputs.simulator && '-simulator' || '' }})
     outputs:
       module_version: ${{ steps.prebuild.outputs.module_version }}
     steps:
@@ -93,5 +103,6 @@ jobs:
           module_name: ${{ inputs.module_name }}
           platform: ${{ inputs.platform }}
           arch: ${{ inputs.arch }}
+          simulator: ${{ inputs.simulator }}
           module_version: ${{ inputs.module_version }}
           patch_file: ${{ inputs.patch_file }}
