@@ -13,6 +13,10 @@ inputs:
     description: "The architecture to prebuild for"
     required: true
     default: "arm64"
+  simulator:
+    description: "Build for a simulator (iOS only). Accepts 'true' or 'false'."
+    required: false
+    default: "false"
   module_version:
     description: "The version of the module to prebuild"
     required: false
@@ -31,21 +35,48 @@ outputs:
   module_version:
     description: "The resolved version of the module"
     value: ${{ steps.parse-module-version.outputs.version }}
+  target:
+    description: "The prebuild target name (e.g. 'ios-arm64-simulator')"
+    value: ${{ steps.target.outputs.target }}
 
 runs:
   using: "composite"
   steps:
-    - name: Validate runner for platform
+    - name: Validate platform/arch/simulator combination
       shell: bash
       run: |
-        case "${{ inputs.platform }}" in
+        platform="${{ inputs.platform }}"
+        arch="${{ inputs.arch }}"
+        simulator="${{ inputs.simulator }}"
+
+        case "$platform" in
           ios|macos)
             if [ "$RUNNER_OS" != "macOS" ]; then
-              echo "::error::Platform '${{ inputs.platform }}' requires a macOS runner, but runner is '$RUNNER_OS'. Set 'runs-on: macos-latest' (or similar) in the calling job."
+              echo "::error::Platform '$platform' requires a macOS runner, but runner is '$RUNNER_OS'. Set 'runs-on: macos-latest' (or similar) in the calling job."
               exit 1
             fi
             ;;
         esac
+
+        if [ "$simulator" = "true" ] && [ "$platform" != "ios" ]; then
+          echo "::error::simulator=true is only valid for platform=ios"
+          exit 1
+        fi
+
+        if [ "$platform" = "ios" ] && [ "$arch" = "x64" ] && [ "$simulator" != "true" ]; then
+          echo "::error::ios + x64 requires simulator=true (iOS devices are arm64-only)"
+          exit 1
+        fi
+
+    - name: Compute target suffix
+      id: target
+      shell: bash
+      run: |
+        suffix=""
+        if [ "${{ inputs.simulator }}" = "true" ]; then
+          suffix="-simulator"
+        fi
+        echo "target=${{ inputs.platform }}-${{ inputs.arch }}${suffix}" >> $GITHUB_OUTPUT
 
     - name: Use Node.js ${{ inputs.node_version }}
       uses: actions/setup-node@v6
@@ -101,6 +132,20 @@ runs:
             extra_args+=(-D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384")
             ;;
         esac
+        case "${{ inputs.platform }}" in
+          android)
+            # bare-make's Android toolchain defaults ANDROID_STL=none, which
+            # passes -nostdinc++ and breaks modules that include any C++ stdlib
+            # header (e.g. sodium-native >=5.x via libjstl). c++_static is a
+            # no-op for pure-C modules and self-contained for C++ ones; switch
+            # to c++_shared if binary-size dedup across multiple native modules
+            # becomes worth the app-side packaging work.
+            extra_args+=(-D ANDROID_STL=c++_static)
+            ;;
+        esac
+        if [ "${{ inputs.simulator }}" = "true" ]; then
+          extra_args+=(--simulator)
+        fi
         bare-make generate \
           --platform ${{ inputs.platform }} \
           --arch ${{ inputs.arch }} \
@@ -121,7 +166,6 @@ runs:
       with:
         name:
           ${{ inputs.module_name }}-${{
-          steps.parse-module-version.outputs.version }}-${{ inputs.platform
-          }}-${{ inputs.arch }}
-        path:
-          ./package/prebuilds/${{ inputs.platform }}-${{ inputs.arch }}/*.node
+          steps.parse-module-version.outputs.version }}-${{
+          steps.target.outputs.target }}
+        path: ./package/prebuilds/${{ steps.target.outputs.target }}/*.node

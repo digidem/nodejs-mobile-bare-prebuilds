@@ -24,6 +24,11 @@ on:
           - "x64"
           - "arm"
         default: "arm64"
+      simulator:
+        type: boolean
+        description: "Build for an iOS simulator (ios only)"
+        required: false
+        default: false
       module_version:
         type: string
         description: "The version of the module to prebuild"
@@ -33,15 +38,6 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
-      runner:
-        type: choice
-        description: "The runner to use for the build"
-        required: true
-        options:
-          - "ubuntu-22.04"
-          - "macos-latest"
-          - "windows-latest"
-        default: "ubuntu-22.04"
   workflow_call:
     inputs:
       module_name:
@@ -58,6 +54,11 @@ on:
         description: "The architecture to prebuild for"
         required: true
         default: "arm64"
+      simulator:
+        type: boolean
+        description: "Build for an iOS simulator (ios only)"
+        required: false
+        default: false
       module_version:
         type: string
         description: "The version of the module to prebuild"
@@ -67,11 +68,6 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
-      runner:
-        type: string
-        description: "The runner to use for the build"
-        required: true
-        default: "ubuntu-22.04"
     outputs:
       module_version:
         description: "The version of the module"
@@ -79,9 +75,9 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-22.04' }}
     timeout-minutes: 10
-    name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }})
+    name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }}${{ inputs.simulator && '-simulator' || '' }})
     outputs:
       module_version: ${{ steps.prebuild.outputs.module_version }}
     steps:
@@ -93,5 +89,6 @@ jobs:
           module_name: ${{ inputs.module_name }}
           platform: ${{ inputs.platform }}
           arch: ${{ inputs.arch }}
+          simulator: ${{ inputs.simulator }}
           module_version: ${{ inputs.module_version }}
           patch_file: ${{ inputs.patch_file }}
