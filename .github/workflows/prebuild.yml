@@ -38,15 +38,6 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
-      runner:
-        type: choice
-        description: "The runner to use for the build"
-        required: true
-        options:
-          - "ubuntu-22.04"
-          - "macos-latest"
-          - "windows-latest"
-        default: "ubuntu-22.04"
   workflow_call:
     inputs:
       module_name:
@@ -77,11 +68,6 @@ on:
         type: string
         description: "Path to patch file to apply to the module (optional)"
         required: false
-      runner:
-        type: string
-        description: "The runner to use for the build"
-        required: true
-        default: "ubuntu-22.04"
     outputs:
       module_version:
         description: "The version of the module"
@@ -89,7 +75,7 @@ on:
 
 jobs:
   build:
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.platform == 'ios' && 'macos-latest' || 'ubuntu-22.04' }}
     timeout-minutes: 10
     name: ${{ inputs.module_name }} (${{ inputs.platform }}-${{ inputs.arch }}${{ inputs.simulator && '-simulator' || '' }})
     outputs:
