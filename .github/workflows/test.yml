@@ -57,10 +57,7 @@ jobs:
     needs: build-android
     uses: ./.github/workflows/test-android.yml
     with:
-      module_name: ${{ inputs.module_name }}
-      module_version: ${{ needs.build-android.outputs.module_version }}
-      artifact_name: ${{ inputs.module_name }}-${{ needs.build-android.outputs.module_version }}-android-x64
-      target: android-x64
+      module_spec: ${{ needs.build-android.outputs.module_spec }}
       test_script: ${{ inputs.test_script }}
       harness_ref: ${{ github.sha }}
 
@@ -80,13 +77,6 @@ jobs:
     needs: build-ios
     uses: ./.github/workflows/test-ios.yml
     with:
-      module_name: ${{ inputs.module_name }}
-      module_version: ${{ needs.build-ios.outputs.module_version }}
-      # Prebuild artifacts from simulator builds are named '…-ios-arm64-simulator',
-      # but the test workflow installs them under prebuilds/ios-arm64/ because
-      # at runtime nodejs-mobile reports process.platform+'-'+process.arch as
-      # 'ios-arm64' regardless of simulator vs device.
-      artifact_name: ${{ inputs.module_name }}-${{ needs.build-ios.outputs.module_version }}-ios-arm64-simulator
-      target: ios-arm64
+      module_spec: ${{ needs.build-ios.outputs.module_spec }}
       test_script: ${{ inputs.test_script }}
       harness_ref: ${{ github.sha }}

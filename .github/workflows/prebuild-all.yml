@@ -1,0 +1,98 @@
+name: Build prebuilds for all Holepunch-module targets
+
+# Reusable workflow that runs prebuild across the standard target set for
+# Holepunch-style bare-native modules (three Android ABIs + iOS device +
+# two iOS simulator slices). Resolves the requested version against npm
+# once up front (so every matrix entry builds the exact same version,
+# and a bogus spec fails fast without spinning up runners), then calls
+# the `prebuild` composite action per matrix entry.
+#
+# Use this when a caller wants "build all the usual targets" without
+# repeating the matrix. For selecting specific targets, call the
+# lower-level `prebuild.yml` directly with your own matrix.
+
+on:
+  workflow_call:
+    inputs:
+      module_name:
+        type: string
+        description: "npm module to build"
+        required: true
+      module_version:
+        type: string
+        description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved against npm before the matrix runs."
+        required: false
+        default: "latest"
+      patch_file:
+        type: string
+        description: "(Optional) path in the caller repo to a patch file"
+        required: false
+        default: ""
+    outputs:
+      module_version:
+        description: "The exact version resolved and used for all builds"
+        value: ${{ jobs.resolve.outputs.version }}
+      module_spec:
+        description: |
+          Combined '<module_name>@<version>' spec — the format npm itself uses.
+          Pass this directly to test-*.yml / release.yml so downstream steps
+          stay pinned to exactly what was built.
+        value: ${{ inputs.module_name }}@${{ jobs.resolve.outputs.version }}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        env:
+          MODULE_NAME: ${{ inputs.module_name }}
+          SPEC: ${{ inputs.module_version }}
+        shell: bash
+        run: |
+          set -eu
+          ver=$(npm view "${MODULE_NAME}@${SPEC}" version)
+          # Semver ranges (e.g. ^5.0.0) make npm emit one line per match —
+          # refuse them so every matrix entry builds the same version.
+          if [ "$(printf '%s\n' "$ver" | wc -l)" -ne 1 ] || [ -z "$ver" ]; then
+            echo "::error::${MODULE_NAME}@${SPEC} did not resolve to a single version. Pass an exact version or a dist-tag."
+            exit 1
+          fi
+          echo "Resolved ${MODULE_NAME}@${SPEC} -> ${ver}"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: android
+            arch: arm64
+          - platform: android
+            arch: x64
+          - platform: android
+            arch: arm
+          - platform: ios
+            arch: arm64
+          - platform: ios
+            arch: arm64
+            simulator: true
+          - platform: ios
+            arch: x64
+            simulator: true
+    runs-on: ${{ matrix.platform == 'ios' && 'macos-latest' || 'ubuntu-22.04' }}
+    timeout-minutes: 20
+    name: ${{ inputs.module_name }} (${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.simulator && '-simulator' || '' }})
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ./.github/actions/prebuild
+        with:
+          module_name: ${{ inputs.module_name }}
+          platform: ${{ matrix.platform }}
+          arch: ${{ matrix.arch }}
+          simulator: ${{ matrix.simulator || false }}
+          module_version: ${{ needs.resolve.outputs.version }}
+          patch_file: ${{ inputs.patch_file }}

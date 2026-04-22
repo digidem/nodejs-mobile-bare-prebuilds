@@ -1,9 +1,14 @@
+name: Publish Release
+
 on:
   workflow_call:
     inputs:
-      module_version:
+      module_spec:
         type: string
-        description: "The version of the module to release"
+        description: |
+          '<module_name>@<version>' (e.g. 'sodium-native@5.1.0'). Output by
+          prebuild.yml / prebuild-all.yml as `module_spec`. The release tag
+          is the version part.
         required: true
 
 jobs:
@@ -11,6 +16,20 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Resolve release tag
+        id: tag
+        env:
+          MODULE_SPEC: ${{ inputs.module_spec }}
+        shell: bash
+        run: |
+          set -eu
+          MODULE_VERSION="${MODULE_SPEC##*@}"
+          if [ -z "$MODULE_VERSION" ] || [ "$MODULE_VERSION" = "$MODULE_SPEC" ]; then
+            echo "::error::module_spec must be '<module_name>@<version>', got '${MODULE_SPEC}'."
+            exit 1
+          fi
+          echo "tag=${MODULE_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Download artifacts
         uses: actions/download-artifact@v8
         with:
@@ -30,4 +49,4 @@ jobs:
           artifactErrorsFailBuild: true
           allowUpdates: true
           replacesArtifacts: true
-          tag: ${{ inputs.module_version }}
+          tag: ${{ steps.tag.outputs.tag }}

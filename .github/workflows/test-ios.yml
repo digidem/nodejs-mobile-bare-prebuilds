@@ -3,28 +3,31 @@ name: Test on iOS simulator
 on:
   workflow_call:
     inputs:
-      module_name:
+      module_spec:
         type: string
-        description: "The npm module being tested (e.g. 'sodium-native')"
-        required: true
-      module_version:
-        type: string
-        description: "Version of the module to install"
-        required: true
-      artifact_name:
-        type: string
-        description: "Name of the prebuild artifact uploaded earlier in the run"
+        description: |
+          '<module_name>@<version>' (e.g. 'sodium-native@5.1.0'). Output by
+          prebuild.yml / prebuild-all.yml as `module_spec` — keeps the test
+          pinned to the exact version that was built.
         required: true
       target:
         type: string
         description: |
           The `prebuilds/<target>/` subfolder to install the .node file into
-          — this is what the runtime loader (require-addon / bare-addon-resolve)
-          will look for, derived from `process.platform + '-' + process.arch`.
-          On the iOS simulator this is always 'ios-arm64' (no -simulator
-          suffix), even if the prebuild was built with simulator=true.
+          — what the runtime loader (require-addon / bare-addon-resolve) looks
+          for, derived from `process.platform + '-' + process.arch`. On the
+          iOS simulator this is always 'ios-arm64' (no -simulator suffix),
+          even though the prebuild artifact was built with simulator=true.
         required: false
         default: "ios-arm64"
+      artifact_name:
+        type: string
+        description: |
+          Name of the prebuild artifact uploaded earlier in the run.
+          If empty (the default), it's computed as `<module_name>-<module_version>-<target>-simulator`
+          — matching the name the simulator-targeted prebuild uploads with.
+        required: false
+        default: ""
       test_script:
         type: string
         description: |
@@ -52,29 +55,30 @@ on:
 
 jobs:
   test:
-    # macos-14 / macos-latest runners are Apple Silicon (arm64) — the
-    # simulator will run arm64 code, so the matching prebuild target is
-    # ios-arm64-simulator.
+    # macos-14 / macos-latest runners are Apple Silicon (arm64); the simulator
+    # runs arm64 code. `target` refers to the runtime install path
+    # (prebuilds/ios-arm64/); the -simulator suffix is added to the artifact
+    # name inside assemble-test-project.
     runs-on: macos-14
     timeout-minutes: 45
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Checkout test harness
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: digidem/nodejs-mobile-bare-prebuilds
           ref: ${{ inputs.harness_ref }}
           path: .nodejs-mobile-bare-prebuilds
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
       - name: Cache NodeMobile xcframework
         id: cache-nodemobile
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .nodejs-mobile-bare-prebuilds/test-harness/ios/NodeMobile
           key: nodemobile-${{ inputs.nodejs_mobile_version }}
@@ -100,10 +104,10 @@ jobs:
       - name: Assemble nodejs-project
         uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/assemble-test-project
         with:
-          module_name: ${{ inputs.module_name }}
-          module_version: ${{ inputs.module_version }}
-          artifact_name: ${{ inputs.artifact_name }}
+          module_spec: ${{ inputs.module_spec }}
           target: ${{ inputs.target }}
+          artifact_suffix: "-simulator"
+          artifact_name: ${{ inputs.artifact_name }}
           test_script: ${{ inputs.test_script }}
           nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/ios/nodejs-project
 

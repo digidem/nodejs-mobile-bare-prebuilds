@@ -1,23 +1,17 @@
 name: "Assemble nodejs-project for testing"
 description: |
-  Downloads a prebuild artifact, installs the module under test into a
-  `nodejs-project/` tree, drops the prebuilt `.node` files into
-  `node_modules/<module>/prebuilds/<target>/`, and places a `main.js` entry
-  point (either the caller's test script, or a generated require() smoke test
-  from default-smoke-test.js).
+  Parses `module_spec` into name + version, downloads the prebuild artifact,
+  installs the module under test into a `nodejs-project/` tree, drops the
+  prebuilt `.node` files into `node_modules/<module>/prebuilds/<target>/`,
+  and places a `main.js` entry point (either the caller's test script, or a
+  generated require() smoke test from default-smoke-test.js).
 
   Requires `node`/`npm` on PATH — add an `actions/setup-node` step before
   calling this action.
 
 inputs:
-  module_name:
-    description: "npm module being tested (e.g. 'sodium-native')"
-    required: true
-  module_version:
-    description: "Version of the module to install"
-    required: true
-  artifact_name:
-    description: "Name of the prebuild artifact uploaded earlier in the run"
+  module_spec:
+    description: "'<module_name>@<version>' (npm spec format, e.g. 'sodium-native@5.1.0')"
     required: true
   target:
     description: |
@@ -25,6 +19,19 @@ inputs:
       This is what the runtime loader (require-addon / bare-addon-resolve)
       will look for at `process.platform + '-' + process.arch`.
     required: true
+  artifact_suffix:
+    description: |
+      Appended to the default artifact name (e.g. '-simulator' for iOS
+      simulator builds, where the build target has '-simulator' in its name
+      but the runtime install target doesn't).
+    required: false
+    default: ""
+  artifact_name:
+    description: |
+      Overrides the default artifact name. If empty, defaults to
+      '<module_name>-<version>-<target><artifact_suffix>'.
+    required: false
+    default: ""
   test_script:
     description: |
       Path to the test script (relative to $GITHUB_WORKSPACE). If empty, a
@@ -40,17 +47,39 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Parse module_spec
+      id: spec
+      shell: bash
+      env:
+        MODULE_SPEC: ${{ inputs.module_spec }}
+        TARGET: ${{ inputs.target }}
+        ARTIFACT_SUFFIX: ${{ inputs.artifact_suffix }}
+        ARTIFACT_NAME: ${{ inputs.artifact_name }}
+      run: |
+        set -eu
+        # Greedy-left / greedy-right handles scoped packages (@scope/pkg@1.0.0).
+        MODULE_NAME="${MODULE_SPEC%@*}"
+        MODULE_VERSION="${MODULE_SPEC##*@}"
+        if [ -z "$MODULE_NAME" ] || [ -z "$MODULE_VERSION" ] || [ "$MODULE_NAME" = "$MODULE_SPEC" ]; then
+          echo "::error::module_spec must be '<module_name>@<version>', got '${MODULE_SPEC}'."
+          exit 1
+        fi
+        artifact="${ARTIFACT_NAME:-${MODULE_NAME}-${MODULE_VERSION}-${TARGET}${ARTIFACT_SUFFIX}}"
+        echo "module_name=${MODULE_NAME}"       >> "$GITHUB_OUTPUT"
+        echo "module_version=${MODULE_VERSION}" >> "$GITHUB_OUTPUT"
+        echo "artifact_name=${artifact}"        >> "$GITHUB_OUTPUT"
+
     - name: Download prebuild artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
-        name: ${{ inputs.artifact_name }}
+        name: ${{ steps.spec.outputs.artifact_name }}
         path: ${{ runner.temp }}/prebuild
 
     - name: Install module and place prebuild
       shell: bash
       env:
-        MODULE_NAME: ${{ inputs.module_name }}
-        MODULE_VERSION: ${{ inputs.module_version }}
+        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        MODULE_VERSION: ${{ steps.spec.outputs.module_version }}
         TARGET: ${{ inputs.target }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
       run: |
@@ -71,7 +100,7 @@ runs:
     - name: Place main.js and test.js
       shell: bash
       env:
-        MODULE_NAME: ${{ inputs.module_name }}
+        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
         TEST_SCRIPT: ${{ inputs.test_script }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
         WRAPPER: ${{ github.action_path }}/wrapper.js

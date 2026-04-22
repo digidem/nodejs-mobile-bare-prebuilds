@@ -31,7 +31,7 @@ on:
         default: false
       module_version:
         type: string
-        description: "The version of the module to prebuild"
+        description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved by `npm pack`."
         required: false
         default: "latest"
       patch_file:
@@ -61,7 +61,7 @@ on:
         default: false
       module_version:
         type: string
-        description: "The version of the module to prebuild"
+        description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved by `npm pack`."
         required: false
         default: "latest"
       patch_file:
@@ -70,8 +70,11 @@ on:
         required: false
     outputs:
       module_version:
-        description: "The version of the module"
+        description: "The resolved version of the module"
         value: ${{ jobs.build.outputs.module_version }}
+      module_spec:
+        description: "Combined '<module_name>@<version>'. Pass directly to test-*.yml / release.yml."
+        value: ${{ inputs.module_name }}@${{ jobs.build.outputs.module_version }}
 
 jobs:
   build:
