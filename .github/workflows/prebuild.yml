@@ -34,10 +34,14 @@ on:
         description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved by `npm pack`."
         required: false
         default: "latest"
-      patch_file:
+      patches_dir:
         type: string
-        description: "Path to patch file to apply to the module (optional)"
+        description: |
+          Directory in the caller repo holding `<module>+<version>.patch`
+          files (patch-package convention). A patch matching the resolved
+          module_version is applied before build.
         required: false
+        default: "patches"
   workflow_call:
     inputs:
       module_name:
@@ -64,10 +68,14 @@ on:
         description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved by `npm pack`."
         required: false
         default: "latest"
-      patch_file:
+      patches_dir:
         type: string
-        description: "Path to patch file to apply to the module (optional)"
+        description: |
+          Directory in the caller repo holding `<module>+<version>.patch`
+          files (patch-package convention). A patch matching the resolved
+          module_version is applied before build.
         required: false
+        default: "patches"
     outputs:
       module_version:
         description: "The resolved version of the module"
@@ -84,7 +92,7 @@ jobs:
     outputs:
       module_version: ${{ steps.prebuild.outputs.module_version }}
     steps:
-      # Caller's repo — needed so `patch_file` (a caller-relative path)
+      # Caller's repo — needed so `patches_dir` (a caller-relative path)
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
@@ -96,4 +104,4 @@ jobs:
           arch: ${{ inputs.arch }}
           simulator: ${{ inputs.simulator }}
           module_version: ${{ inputs.module_version }}
-          patch_file: ${{ inputs.patch_file }}
+          patches_dir: ${{ inputs.patches_dir }}
