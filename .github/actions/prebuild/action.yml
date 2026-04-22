@@ -36,8 +36,8 @@ outputs:
     description: "The resolved version of the module"
     value: ${{ steps.parse-module-version.outputs.version }}
   target:
-    description: "The prebuild target key (e.g. 'ios-arm64-simulator')"
-    value: ${{ steps.target.outputs.key }}
+    description: "The prebuild target name (e.g. 'ios-arm64-simulator')"
+    value: ${{ steps.target.outputs.target }}
 
 runs:
   using: "composite"
@@ -76,7 +76,7 @@ runs:
         if [ "${{ inputs.simulator }}" = "true" ]; then
           suffix="-simulator"
         fi
-        echo "key=${{ inputs.platform }}-${{ inputs.arch }}${suffix}" >> $GITHUB_OUTPUT
+        echo "target=${{ inputs.platform }}-${{ inputs.arch }}${suffix}" >> $GITHUB_OUTPUT
 
     - name: Use Node.js ${{ inputs.node_version }}
       uses: actions/setup-node@v6
@@ -167,5 +167,5 @@ runs:
         name:
           ${{ inputs.module_name }}-${{
           steps.parse-module-version.outputs.version }}-${{
-          steps.target.outputs.key }}
-        path: ./package/prebuilds/${{ steps.target.outputs.key }}/*.node
+          steps.target.outputs.target }}
+        path: ./package/prebuilds/${{ steps.target.outputs.target }}/*.node
