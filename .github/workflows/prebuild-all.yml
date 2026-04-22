@@ -86,9 +86,11 @@ jobs:
     timeout-minutes: 20
     name: ${{ inputs.module_name }} (${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.simulator && '-simulator' || '' }})
     steps:
+      # Caller's repo — needed so `patch_file` (a caller-relative path)
+      # resolves against the workspace root.
       - uses: actions/checkout@v6
 
-      - uses: ./.github/actions/prebuild
+      - uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@main
         with:
           module_name: ${{ inputs.module_name }}
           platform: ${{ matrix.platform }}
