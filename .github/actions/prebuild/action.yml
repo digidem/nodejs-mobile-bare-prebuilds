@@ -132,6 +132,17 @@ runs:
             extra_args+=(-D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384")
             ;;
         esac
+        case "${{ inputs.platform }}" in
+          android)
+            # bare-make's Android toolchain defaults ANDROID_STL=none, which
+            # passes -nostdinc++ and breaks modules that include any C++ stdlib
+            # header (e.g. sodium-native >=5.x via libjstl). c++_static is a
+            # no-op for pure-C modules and self-contained for C++ ones; switch
+            # to c++_shared if binary-size dedup across multiple native modules
+            # becomes worth the app-side packaging work.
+            extra_args+=(-D ANDROID_STL=c++_static)
+            ;;
+        esac
         if [ "${{ inputs.simulator }}" = "true" ]; then
           extra_args+=(--simulator)
         fi
