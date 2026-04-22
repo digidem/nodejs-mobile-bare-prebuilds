@@ -1,0 +1,127 @@
+name: "Generate prebuild"
+description: "Build a nodejs-mobile prebuild for a native module"
+
+inputs:
+  module_name:
+    description: "The name of the module to prebuild"
+    required: true
+  platform:
+    description: "The platform to prebuild for"
+    required: true
+    default: "android"
+  arch:
+    description: "The architecture to prebuild for"
+    required: true
+    default: "arm64"
+  module_version:
+    description: "The version of the module to prebuild"
+    required: false
+    default: "latest"
+  patch_file:
+    description:
+      "Path to patch file to apply to the module (resolved relative to the
+      caller's workspace)"
+    required: false
+  node_version:
+    description: "Node.js version to use"
+    required: false
+    default: "24"
+
+outputs:
+  module_version:
+    description: "The resolved version of the module"
+    value: ${{ steps.parse-module-version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate runner for platform
+      shell: bash
+      run: |
+        case "${{ inputs.platform }}" in
+          ios|macos)
+            if [ "$RUNNER_OS" != "macOS" ]; then
+              echo "::error::Platform '${{ inputs.platform }}' requires a macOS runner, but runner is '$RUNNER_OS'. Set 'runs-on: macos-latest' (or similar) in the calling job."
+              exit 1
+            fi
+            ;;
+        esac
+
+    - name: Use Node.js ${{ inputs.node_version }}
+      uses: actions/setup-node@v6
+      with:
+        node-version: ${{ inputs.node_version }}
+
+    - name: Download npm package and unpack
+      shell: bash
+      run:
+        npm pack ${{ inputs.module_name }}@${{ inputs.module_version }} | xargs
+        tar -zxvf
+
+    - name: Apply patch if provided
+      if: ${{ inputs.patch_file }}
+      shell: bash
+      run: |
+        if [ -f "${{ inputs.patch_file }}" ]; then
+          echo "Applying patch: ${{ inputs.patch_file }}"
+          cd package
+          patch -p1 < ../${{ inputs.patch_file }}
+        else
+          echo "Patch file not found: ${{ inputs.patch_file }}"
+          exit 1
+        fi
+
+    - name: Parse module version
+      id: parse-module-version
+      shell: bash
+      working-directory: ./package
+      run: echo version=$(jq -r .version package.json) >> $GITHUB_OUTPUT
+
+    - name: Install bare-make
+      shell: bash
+      run: npm install -g bare-make
+
+    - name: Install deps for package
+      shell: bash
+      working-directory: ./package
+      run: npm install
+
+    - name: Install patched cmake-napi
+      shell: bash
+      working-directory: ./package
+      run: npm install cmake-napi@github:digidem/cmake-napi-nodejs-mobile
+
+    - name: Generate
+      shell: bash
+      working-directory: ./package
+      run: |
+        extra_args=()
+        case "${{ inputs.platform }}" in
+          android|linux)
+            extra_args+=(-D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384")
+            ;;
+        esac
+        bare-make generate \
+          --platform ${{ inputs.platform }} \
+          --arch ${{ inputs.arch }} \
+          "${extra_args[@]}"
+
+    - name: Build
+      shell: bash
+      working-directory: ./package
+      run: bare-make build
+
+    - name: Install
+      shell: bash
+      working-directory: ./package
+      run: bare-make install
+
+    - name: Upload prebuild artifacts
+      uses: actions/upload-artifact@v7
+      with:
+        name:
+          ${{ inputs.module_name }}-${{
+          steps.parse-module-version.outputs.version }}-${{ inputs.platform
+          }}-${{ inputs.arch }}
+        path:
+          ./package/prebuilds/${{ inputs.platform }}-${{ inputs.arch }}/*.node
