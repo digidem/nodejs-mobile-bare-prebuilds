@@ -158,8 +158,10 @@ jobs:
           ram-size: 4096M
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
+          # android-emulator-runner runs this under /bin/sh (dash), which does
+          # not support `set -o pipefail`.
           script: |
-            set -euo pipefail
+            set -eu
             APK=.nodejs-mobile-bare-prebuilds/test-harness/android/app/build/outputs/apk/debug/app-debug.apk
 
             adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
