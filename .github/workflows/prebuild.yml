@@ -96,18 +96,7 @@ jobs:
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
-      # This repo, pinned to the same commit as the reusable workflow
-      # itself (`github.workflow_sha`) so callers pinning to a semver tag
-      # get the matching action. Expressions aren't allowed directly in a
-      # step-level `uses:` ref, so we pull the action in as a local path
-      # via a second checkout rather than a remote `…@ref` reference.
-      - uses: actions/checkout@v6
-        with:
-          repository: digidem/nodejs-mobile-bare-prebuilds
-          ref: ${{ github.workflow_sha }}
-          path: .nodejs-mobile-bare-prebuilds
-
-      - uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/prebuild
+      - uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@main
         id: prebuild
         with:
           module_name: ${{ inputs.module_name }}

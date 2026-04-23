@@ -62,6 +62,11 @@ on:
         description: "Name of the iOS Simulator device to boot"
         required: false
         default: "iPhone 15"
+      harness_ref:
+        type: string
+        description: "Ref of digidem/nodejs-mobile-bare-prebuilds to pull the harness from"
+        required: false
+        default: "main"
       git_repo_slug:
         type: string
         description: |
@@ -92,13 +97,11 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v6
 
-      # Pinned to the same commit as this reusable workflow, so callers
-      # pinning to a semver tag get the matching harness + composite action.
       - name: Checkout test harness
         uses: actions/checkout@v6
         with:
           repository: digidem/nodejs-mobile-bare-prebuilds
-          ref: ${{ github.workflow_sha }}
+          ref: ${{ inputs.harness_ref }}
           path: .nodejs-mobile-bare-prebuilds
 
       - uses: actions/setup-node@v6
