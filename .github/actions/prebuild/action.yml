@@ -163,13 +163,30 @@ runs:
         esac
         case "${{ inputs.platform }}" in
           android)
-            # bare-make's Android toolchain defaults ANDROID_STL=none, which
-            # passes -nostdinc++ and breaks modules that include any C++ stdlib
-            # header (e.g. sodium-native >=5.x via libjstl). c++_static is a
-            # no-op for pure-C modules and self-contained for C++ ones; switch
-            # to c++_shared if binary-size dedup across multiple native modules
-            # becomes worth the app-side packaging work.
-            extra_args+=(-D ANDROID_STL=c++_static)
+            # bare-make's Android toolchain leaves ANDROID_STL=none, so the
+            # NDK's clang adds -nostdinc++ and no C++ stdlib headers are in
+            # scope. Modules that include any C++ stdlib header (e.g.
+            # sodium-native >=5.x via libjstl, quickbit-native via bare-api)
+            # won't compile.
+            #
+            # Inject the NDK's own libc++ headers as a system include —
+            # equivalent to the `target_include_directories(... SYSTEM
+            # PRIVATE "${CMAKE_SYSROOT}/usr/include/c++/v1")` pattern modules
+            # have otherwise had to carry as a patch. We set this for both C
+            # and C++ languages because bare-make's pipeline runs the C
+            # compiler over C++ headers in some configurations.
+            NDK_ROOT="${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-${ANDROID_NDK:-}}}"
+            if [ -z "$NDK_ROOT" ]; then
+              NDK_ROOT=$(ls -d "${ANDROID_HOME}/ndk"/*/ 2>/dev/null | sort -V | tail -1)
+              NDK_ROOT="${NDK_ROOT%/}"
+            fi
+            LIBCXX_INCLUDE="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/c++/v1"
+            if [ ! -d "$LIBCXX_INCLUDE" ]; then
+              echo "::error::Could not find NDK libc++ headers at $LIBCXX_INCLUDE"
+              exit 1
+            fi
+            extra_args+=(-D "CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES=$LIBCXX_INCLUDE")
+            extra_args+=(-D "CMAKE_C_STANDARD_INCLUDE_DIRECTORIES=$LIBCXX_INCLUDE")
             ;;
         esac
         if [ "${{ inputs.simulator }}" = "true" ]; then
