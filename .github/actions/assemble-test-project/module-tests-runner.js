@@ -16,15 +16,19 @@
 // time and auto-flush on event-loop drain, so loading each test file in
 // order is equivalent to running the module's own `npm test` script.
 //
-// __MODULE_NAME__ is substituted at CI time by the assemble-test-project
-// composite action.
+// Config (module name + exclude list) is read from the JSON file the
+// composite action drops next to this file — no placeholder substitution,
+// so this template is a plain runnable file.
 
 const fs = require('fs')
 const path = require('path')
 const { pathToFileURL } = require('url')
 
-const moduleRoot = path.join(__dirname, 'node_modules', '__MODULE_NAME__')
+const { moduleName, testExclude = [] } = require('./harness-config.json')
+
+const moduleRoot = path.join(__dirname, 'node_modules', moduleName)
 const TEST_EXTS = ['.js', '.mjs', '.cjs']
+const EXCLUDE = new Set(testExclude)
 
 function discoverTestFiles() {
   // Directory layout: node_modules/<module>/test/*.{js,mjs,cjs}
@@ -33,6 +37,7 @@ function discoverTestFiles() {
     const dirFiles = fs
       .readdirSync(testDir)
       .filter((f) => TEST_EXTS.some((ext) => f.endsWith(ext)))
+      .filter((f) => !EXCLUDE.has(f))
       .sort()
       .map((f) => path.join(testDir, f))
     if (dirFiles.length > 0) return dirFiles
@@ -40,7 +45,9 @@ function discoverTestFiles() {
 
   // Single-file layout: node_modules/<module>/test.{js,mjs,cjs}
   for (const ext of TEST_EXTS) {
-    const p = path.join(moduleRoot, 'test' + ext)
+    const name = 'test' + ext
+    if (EXCLUDE.has(name)) continue
+    const p = path.join(moduleRoot, name)
     if (fs.existsSync(p)) return [p]
   }
 
@@ -48,13 +55,20 @@ function discoverTestFiles() {
 }
 
 async function main() {
+  if (EXCLUDE.size > 0) {
+    // TAP comment — parsers ignore it, humans see it in the workflow log.
+    console.log('# excluded: ' + [...EXCLUDE].sort().join(', '))
+  }
+
   const files = discoverTestFiles()
 
   if (files.length === 0) {
     console.log('TAP version 13')
     console.log('1..1')
     console.log(
-      "not ok 1 - __MODULE_NAME__ has no test files (expected test/*.{js,mjs,cjs} or test.{js,mjs,cjs} at module root — overlay failed?)"
+      'not ok 1 - ' +
+        moduleName +
+        ' has no test files (expected test/*.{js,mjs,cjs} or test.{js,mjs,cjs} at module root — overlay failed?)'
     )
     console.log('  ---')
     console.log('  moduleRoot: ' + JSON.stringify(moduleRoot))
@@ -71,7 +85,7 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Fatal error loading tests from __MODULE_NAME__:')
+  console.error('Fatal error loading tests from ' + moduleName + ':')
   console.error(err && err.stack ? err.stack : err)
   process.exit(1)
 })

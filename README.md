@@ -64,6 +64,9 @@ jobs:
       test_runner: module
       git_repo_slug: ${{ needs.build.outputs.git_repo_slug }}
       git_ref: ${{ needs.build.outputs.git_ref }}
+      # Skip any tests that can't run in the emulator sandbox.
+      test_exclude: |
+        test-spawn.js
 
   test-ios:
     needs: build
@@ -92,6 +95,25 @@ jobs:
 | `module_name`    | yes      | —          | npm module to build                                                               |
 | `module_version` | no       | `latest`   | Exact version or dist-tag. Resolved against npm before the matrix runs.           |
 | `patches_dir`    | no       | `patches`  | Directory in the caller repo holding `<module>+<version>.patch` files (see below) |
+
+**`test-android.yml` / `test-ios.yml`**
+
+| Input           | Required | Default                             | Description                                                                                                                     |
+| --------------- | -------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `module_spec`   | yes      | —                                   | `<module>@<version>`. Pass `needs.build.outputs.module_spec`.                                                                   |
+| `target`        | no       | `android-x64` / `ios-arm64`         | Runtime `prebuilds/<target>/` subdir. Android also accepts `android-arm64`.                                                     |
+| `artifact_name` | no       | _derived from module_spec + target_ | Override the default artifact name.                                                                                             |
+| `test_runner`   | no       | `smoke`                             | `smoke` / `module` / `custom` — see [Testing prebuilds](#testing-prebuilds-on-an-emulator--simulator) below.                     |
+| `test_script`   | no       | —                                   | Caller-repo path to a test script. Only used when `test_runner: custom`.                                                        |
+| `test_exclude`  | no       | —                                   | Newline-separated list of test file basenames to skip when `test_runner: module`.                                               |
+| `git_repo_slug` | no       | —                                   | `owner/repo` of the module's upstream GitHub repo. Pass `needs.build.outputs.git_repo_slug`. Required when `test_runner: module`. |
+| `git_ref`       | no       | —                                   | Commit SHA or tag to check out the upstream repo at. Pass `needs.build.outputs.git_ref`. Required when `test_runner: module`.   |
+
+**`release.yml`**
+
+| Input         | Required | Default | Description                                                                                    |
+| ------------- | -------- | ------- | ---------------------------------------------------------------------------------------------- |
+| `module_spec` | yes      | —       | `<module>@<version>`. Pass `needs.build.outputs.module_spec`. The release tag is the version. |
 
 ### Outputs
 
@@ -123,15 +145,26 @@ Three `test_runner` modes, selected per test workflow:
 
 - **`smoke`** (default): generated test that just `require()`s the module.
   Enough to catch linker / load-time breakage without caller JS.
-- **`module`**: runs the module's own `test/*.js` via `brittle`. See below.
+- **`module`**: runs the module's own test suite inside nodejs-mobile. See
+  [below](#running-the-modules-own-test-suite).
 - **`custom`**: uses the file at `test_script` (caller-repo path).
 
 ### Running the module's own test suite
 
-The `test/` folder is usually excluded from npm tarballs (via `.npmignore` or
-the package's `files` field), so the test workflows check out the upstream
-GitHub repo separately and overlay its `test/` into
-`node_modules/<module>/test/` before running.
+The module's tests are usually excluded from npm tarballs (via `.npmignore`
+or the package's `files` field), so the test workflows check out the
+upstream GitHub repo separately and overlay the tests into
+`node_modules/<module>/` before running. Two layouts are supported:
+
+- **directory style** — `test/*.{js,mjs,cjs}` (each file `import()`ed in
+  sorted order)
+- **single-file style** — `test.{js,mjs,cjs}` at the module root
+
+The module's devDependencies are installed from the tarball's own
+`package.json` into `node_modules/<module>/node_modules/`, so whatever test
+runner the module declares (brittle, tape, tap, node:test, …) is available
+when the test files `require()` / `import` it. `npm ci` is used when the
+upstream ships a `package-lock.json`, `npm install` otherwise.
 
 The git ref is resolved in `prebuild-all.yml`'s `resolve` job:
 
@@ -144,12 +177,26 @@ The git ref is resolved in `prebuild-all.yml`'s `resolve` job:
 3. **Empty** — no git source available. `test_runner: module` will fail
    loudly at test time; use `smoke` instead.
 
-Pass both `git_repo_slug` and `git_ref` from `prebuild-all.yml`'s outputs into
-the test workflows when using `test_runner: module`. Non-GitHub upstreams are
-not supported in v2.
+Pass both `git_repo_slug` and `git_ref` from `prebuild-all.yml`'s outputs
+into the test workflows when using `test_runner: module`. Non-GitHub
+upstreams are not supported.
+
+**Skipping individual tests.** Some suites include tests that can't run in
+the emulator / simulator sandbox (process spawning, host FS paths, native
+OS features). Pass a newline-separated list of basenames in `test_exclude`
+to skip them:
+
+```yaml
+test_exclude: |
+  test-spawn.js
+  test-ipc.js
+```
+
+Excluded files are listed as a TAP `# excluded: …` comment in the workflow
+log for visibility.
 
 **Note:** the build always uses the npm tarball as its source. The git
-checkout is only used to populate the `test/` folder for the `module` test
+checkout is only used to populate the test files for the `module` test
 runner.
 
 ## Patching the module before build

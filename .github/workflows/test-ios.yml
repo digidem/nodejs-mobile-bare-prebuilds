@@ -44,6 +44,14 @@ on:
           root). Only used when test_runner is 'custom'.
         required: false
         default: ""
+      test_exclude:
+        type: string
+        description: |
+          Newline-separated list of test file basenames to skip when
+          test_runner is 'module' (e.g. tests that can't run in the
+          simulator sandbox).
+        required: false
+        default: ""
       nodejs_mobile_version:
         type: string
         description: "nodejs-mobile release tag to download NodeMobile.xcframework from"
@@ -134,6 +142,7 @@ jobs:
           artifact_name: ${{ inputs.artifact_name }}
           test_runner: ${{ inputs.test_runner }}
           test_script: ${{ inputs.test_script }}
+          test_exclude: ${{ inputs.test_exclude }}
           git_repo_slug: ${{ inputs.git_repo_slug }}
           git_ref: ${{ inputs.git_ref }}
           nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/ios/nodejs-project

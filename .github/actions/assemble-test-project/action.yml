@@ -54,6 +54,15 @@ inputs:
       Only used when test_runner is 'custom'.
     required: false
     default: ""
+  test_exclude:
+    description: |
+      Newline-separated list of test file basenames to skip when
+      test_runner is 'module'. Matched against the filename at the
+      overlaid location (e.g. 'test-ipc.js', not a full path). Useful for
+      modules whose suite includes a few cases that can't run in the
+      sandbox (process spawning, fs paths outside the app container, etc.).
+    required: false
+    default: ""
   git_repo_slug:
     description: |
       'owner/repo' for the module's upstream GitHub repo. Combined with
@@ -222,32 +231,46 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund --no-save
         fi
 
-    - name: Place main.js and test.js
+    - name: Place main.js, test.js, and harness-config.json
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
         TEST_RUNNER: ${{ inputs.test_runner }}
         TEST_SCRIPT: ${{ inputs.test_script }}
+        TEST_EXCLUDE: ${{ inputs.test_exclude }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # main.js is always the wrapper: it installs the exit-sentinel handler
-        # and then delegates to ./test.js.
+        # main.js is always the wrapper: installs the exit-sentinel handler
+        # and delegates to ./test.js.
         cp "$ACTION_PATH/wrapper.js" "$NODEDIR/main.js"
+
+        # The 'smoke' and 'module' runners read their config (module name,
+        # exclude list) from this JSON file at runtime — so the templates are
+        # plain runnable JS with no placeholder substitution.
+        node -e '
+          const fs = require("fs")
+          const path = require("path")
+          const testExclude = (process.env.TEST_EXCLUDE || "")
+            .split(/\r?\n+/)
+            .map((s) => s.trim())
+            .filter(Boolean)
+          const cfg = { moduleName: process.env.MODULE_NAME, testExclude }
+          fs.writeFileSync(
+            path.join(process.env.NODEDIR, "harness-config.json"),
+            JSON.stringify(cfg, null, 2) + "\n"
+          )
+        '
 
         case "$TEST_RUNNER" in
           smoke)
-            template="$ACTION_PATH/default-smoke-test.js"
-            esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
-            sed "s/__MODULE_NAME__/$esc/g" "$template" > "$NODEDIR/test.js"
+            cp "$ACTION_PATH/default-smoke-test.js" "$NODEDIR/test.js"
             echo "test_runner=smoke: generated require() smoke test."
             ;;
           module)
-            template="$ACTION_PATH/module-tests-runner.js"
-            esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
-            sed "s/__MODULE_NAME__/$esc/g" "$template" > "$NODEDIR/test.js"
-            echo "test_runner=module: running ${MODULE_NAME}'s own test/*.js."
+            cp "$ACTION_PATH/module-tests-runner.js" "$NODEDIR/test.js"
+            echo "test_runner=module: running ${MODULE_NAME}'s own tests."
             ;;
           custom)
             if [ -z "$TEST_SCRIPT" ]; then
