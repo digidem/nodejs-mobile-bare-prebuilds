@@ -129,12 +129,15 @@ runs:
         echo "Prebuild placed under $dst:"
         ls -la "$dst"
 
-    # The `module` test_runner runs the module's own test/*.js,
-    # but npm tarballs almost always exclude test/ (via .npmignore or the
-    # package's `files` field). Check out the upstream repo pinned to the
-    # SHA/tag resolved from npm metadata and copy its test/ directory into
-    # node_modules/<module>/test/. Also pull package-lock.json so the
-    # devDep install below can use `npm ci` for deterministic versions.
+    # The `module` test_runner runs the module's own tests, but npm tarballs
+    # almost always exclude them (via .npmignore or the package's `files`
+    # field). Check out the upstream repo pinned to the SHA/tag resolved
+    # from npm metadata and copy its tests into node_modules/<module>/.
+    # Two layouts are supported:
+    #   - directory:   <repo>/test/*.{js,mjs,cjs}
+    #   - single-file: <repo>/test.{js,mjs,cjs}
+    # Also pulls package-lock.json so the devDep install below can use
+    # `npm ci` for deterministic versions.
     - name: Checkout upstream test/ folder (+ lockfile)
       if: ${{ inputs.test_runner == 'module' && inputs.git_ref != '' }}
       uses: actions/checkout@v6
@@ -144,11 +147,14 @@ runs:
         path: upstream-src
         sparse-checkout: |
           test
+          test.js
+          test.mjs
+          test.cjs
           package-lock.json
         sparse-checkout-cone-mode: false
         fetch-depth: 1
 
-    - name: Overlay upstream test/ (and lockfile) into node_modules
+    - name: Overlay upstream tests (and lockfile) into node_modules
       if: ${{ inputs.test_runner == 'module' && inputs.git_ref != '' }}
       shell: bash
       env:
@@ -156,22 +162,38 @@ runs:
         NODEDIR: ${{ inputs.nodejs_project_dir }}
       run: |
         set -eu
-        src_test="${GITHUB_WORKSPACE}/upstream-src/test"
-        if [ ! -d "$src_test" ]; then
-          echo "::error::Upstream checkout has no test/ directory at ${src_test}"
+        src_root="${GITHUB_WORKSPACE}/upstream-src"
+        mod="${NODEDIR}/node_modules/${MODULE_NAME}"
+        overlays=0
+
+        # Directory-style tests.
+        if [ -d "${src_root}/test" ]; then
+          rm -rf "${mod}/test"
+          cp -R "${src_root}/test" "${mod}/test"
+          echo "Overlaid upstream test/ → ${mod}/test"
+          overlays=$((overlays + 1))
+        fi
+
+        # Single-file tests at the repo root (hypercore-style).
+        for name in test.js test.mjs test.cjs; do
+          if [ -f "${src_root}/${name}" ]; then
+            cp "${src_root}/${name}" "${mod}/${name}"
+            echo "Overlaid upstream ${name} → ${mod}/${name}"
+            overlays=$((overlays + 1))
+          fi
+        done
+
+        if [ "$overlays" -eq 0 ]; then
+          echo "::error::Upstream checkout has no test/ directory or test.{js,mjs,cjs} at repo root"
           exit 1
         fi
-        mod="${NODEDIR}/node_modules/${MODULE_NAME}"
-        rm -rf "$mod/test"
-        cp -R "$src_test" "$mod/test"
-        echo "Overlaid upstream test/ → ${mod}/test"
 
         # Optional: copy lockfile so the devDep install step can use `npm ci`.
         # Absent on some older repos / monorepo subdirs; npm install handles
         # that case.
-        src_lock="${GITHUB_WORKSPACE}/upstream-src/package-lock.json"
+        src_lock="${src_root}/package-lock.json"
         if [ -f "$src_lock" ]; then
-          cp "$src_lock" "$mod/package-lock.json"
+          cp "$src_lock" "${mod}/package-lock.json"
           echo "Copied upstream package-lock.json → ${mod}/package-lock.json"
         fi
 
