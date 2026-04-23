@@ -4,9 +4,9 @@ name: End-to-end test (manual dispatch)
 # the whole pipeline can be exercised from the Actions tab without needing
 # to call these reusable workflows from another repo.
 #
-# The reusable workflows auto-pin their internal checkouts to the same
-# repo+ref that supplied the workflow (`github.workflow_ref`), so semver
-# tags and in-repo manual runs both resolve the matching local actions.
+# The reusable workflows auto-pin their internal checkouts to their own
+# commit (`github.workflow_sha`), so in-flight changes on the triggering
+# branch are tested as-is without any extra ref plumbing.
 
 on:
   workflow_dispatch:

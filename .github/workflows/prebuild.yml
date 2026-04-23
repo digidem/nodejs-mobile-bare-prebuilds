@@ -96,26 +96,15 @@ jobs:
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
-      # This repo, pinned to the same repo+ref that supplied this reusable
-      # workflow. `github.workflow_ref` is
-      # `<owner>/<repo>/.github/workflows/<file>@<ref>`, so parse it once
-      # and reuse that ref for the local-path composite action checkout.
-      - name: Resolve self checkout
-        id: self
-        shell: bash
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          set -euo pipefail
-          repo="${WORKFLOW_REF%%/.github/workflows/*}"
-          ref="${WORKFLOW_REF##*@}"
-          echo "repository=${repo}" >> "$GITHUB_OUTPUT"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-
+      # This repo, pinned to the same commit as the reusable workflow
+      # itself (`github.workflow_sha`) so callers pinning to a semver tag
+      # get the matching action. Expressions aren't allowed directly in a
+      # step-level `uses:` ref, so we pull the action in as a local path
+      # via a second checkout rather than a remote `…@ref` reference.
       - uses: actions/checkout@v6
         with:
-          repository: ${{ steps.self.outputs.repository }}
-          ref: ${{ steps.self.outputs.ref }}
+          repository: digidem/nodejs-mobile-bare-prebuilds
+          ref: ${{ github.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
 
       - uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/prebuild

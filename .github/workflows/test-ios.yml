@@ -92,26 +92,13 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v6
 
-      # Pin the harness checkout to the same repo+ref that supplied this
-      # reusable workflow, so cross-repo callers and semver tags get the
-      # matching harness + composite action.
-      - name: Resolve self checkout
-        id: self
-        shell: bash
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-        run: |
-          set -euo pipefail
-          repo="${WORKFLOW_REF%%/.github/workflows/*}"
-          ref="${WORKFLOW_REF##*@}"
-          echo "repository=${repo}" >> "$GITHUB_OUTPUT"
-          echo "ref=${ref}" >> "$GITHUB_OUTPUT"
-
+      # Pinned to the same commit as this reusable workflow, so callers
+      # pinning to a semver tag get the matching harness + composite action.
       - name: Checkout test harness
         uses: actions/checkout@v6
         with:
-          repository: ${{ steps.self.outputs.repository }}
-          ref: ${{ steps.self.outputs.ref }}
+          repository: digidem/nodejs-mobile-bare-prebuilds
+          ref: ${{ github.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
 
       - uses: actions/setup-node@v6
