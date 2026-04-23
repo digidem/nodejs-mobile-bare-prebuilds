@@ -23,11 +23,15 @@ on:
         description: "Exact version or dist-tag (e.g. '5.1.0' or 'latest'). Resolved against npm before the matrix runs."
         required: false
         default: "latest"
-      patch_file:
+      patches_dir:
         type: string
-        description: "(Optional) path in the caller repo to a patch file"
+        description: |
+          Directory in the caller repo holding `<module>+<version>.patch`
+          files (patch-package convention). A patch matching the resolved
+          module_version is applied before build; a missing file fails the
+          run if siblings exist for the same module at other versions.
         required: false
-        default: ""
+        default: "patches"
     outputs:
       module_version:
         description: "The exact version resolved and used for all builds"
@@ -38,17 +42,37 @@ on:
           Pass this directly to test-*.yml / release.yml so downstream steps
           stay pinned to exactly what was built.
         value: ${{ inputs.module_name }}@${{ jobs.resolve.outputs.version }}
+      git_repo_slug:
+        description: |
+          'owner/repo' for the module's upstream GitHub repo, derived from
+          the package's `repository.url` metadata. Empty when the upstream
+          isn't on GitHub or `repository.url` is missing. Feeds
+          `actions/checkout` in the test-*.yml workflows so module tests can
+          run against the upstream `test/` folder (usually excluded from the
+          npm tarball).
+        value: ${{ jobs.resolve.outputs.git_repo_slug }}
+      git_ref:
+        description: |
+          Git ref to check out the upstream repo at — a commit SHA from
+          `npm view ... gitHead` when available, else a `v<version>` tag
+          confirmed via the GitHub API, else empty. Both forms are accepted
+          by `actions/checkout`'s `ref:` input. Empty means module tests
+          can't be run (test_runner=module will fail loudly).
+        value: ${{ jobs.resolve.outputs.git_ref }}
 
 jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
+      git_repo_slug: ${{ steps.resolve.outputs.git_repo_slug }}
+      git_ref: ${{ steps.resolve.outputs.git_ref }}
     steps:
       - id: resolve
         env:
           MODULE_NAME: ${{ inputs.module_name }}
           SPEC: ${{ inputs.module_version }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -eu
@@ -61,6 +85,35 @@ jobs:
           fi
           echo "Resolved ${MODULE_NAME}@${SPEC} -> ${ver}"
           echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+          # Best-effort resolve upstream git source for test overlay.
+          # Failures here leave outputs empty; test_runner=module handles
+          # that by failing loudly at test time.
+          slug=""
+          ref=""
+          repo_url=$(npm view "${MODULE_NAME}@${ver}" repository.url 2>/dev/null || true)
+          case "$repo_url" in
+            *github.com*)
+              slug=$(printf '%s' "$repo_url" \
+                | sed -E 's#^git\+##; s#\.git$##; s#^git@github\.com:##; s#^ssh://git@github\.com/##; s#^https?://github\.com/##')
+              ;;
+          esac
+
+          if [ -n "$slug" ]; then
+            git_head=$(npm view "${MODULE_NAME}@${ver}" gitHead 2>/dev/null || true)
+            if printf '%s' "$git_head" | grep -qE '^[0-9a-f]{40}$'; then
+              # gitHead may point at a commit not reachable from any branch
+              # (force-pushed history); actions/checkout still finds it via
+              # the object database when passed a bare SHA.
+              ref="$git_head"
+            elif gh api "repos/${slug}/git/refs/tags/v${ver}" >/dev/null 2>&1; then
+              ref="v${ver}"
+            fi
+          fi
+
+          echo "Upstream git: slug='${slug}' ref='${ref}'"
+          echo "git_repo_slug=${slug}" >> "$GITHUB_OUTPUT"
+          echo "git_ref=${ref}"        >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
@@ -86,7 +139,7 @@ jobs:
     timeout-minutes: 20
     name: ${{ inputs.module_name }} (${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.simulator && '-simulator' || '' }})
     steps:
-      # Caller's repo — needed so `patch_file` (a caller-relative path)
+      # Caller's repo — needed so `patches_dir` (a caller-relative path)
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
@@ -97,4 +150,4 @@ jobs:
           arch: ${{ matrix.arch }}
           simulator: ${{ matrix.simulator || false }}
           module_version: ${{ needs.resolve.outputs.version }}
-          patch_file: ${{ inputs.patch_file }}
+          patches_dir: ${{ inputs.patches_dir }}

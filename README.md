@@ -7,8 +7,13 @@ by the Holepunch team. These modules are built using
 ## Table of Contents
 
 - [Introduction](#introduction)
-- [Getting Started](#getting-started)
 - [Usage](#usage)
+  - [Inputs](#inputs)
+  - [Outputs](#outputs)
+  - [Manual dispatch](#manual-dispatch)
+- [Testing prebuilds on an emulator / simulator](#testing-prebuilds-on-an-emulator--simulator)
+  - [Running the module's own test suite](#running-the-modules-own-test-suite)
+- [Patching the module before build](#patching-the-module-before-build)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -19,152 +24,162 @@ tools to streamline the process of building native modules for Node.js mobile
 applications. These workflows are designed to be used with the `bare-make` build
 system.
 
+The build input is always the **npm tarball** (`npm pack <module>@<version>`),
+so the published prebuild corresponds exactly to what users get from
+`npm install`. The test input is the **upstream git repo** at the commit the
+tarball was published from — needed because the `test/` folder is almost always
+excluded from npm tarballs.
+
 ## Usage
 
-The prebuild step is published as a composite action. Call it from a job in your
-own repository, typically inside a matrix so each architecture builds in
-parallel. The `release.yml` reusable workflow collects the uploaded artifacts
-and creates a GitHub Release.
+The most common entry point is `prebuild-all.yml`, which builds the standard
+target set (three Android ABIs + iOS device + two iOS simulator slices),
+optionally runs the module's own test suite on an emulator/simulator, and
+publishes a GitHub Release with the artifacts.
 
 ```yaml
-name: Generate prebuilds
+name: Build, test, and release prebuilds
 
 on:
   workflow_dispatch:
     inputs:
       module_version:
-        description: "Module version"
-        required: true
+        description: "Exact version or dist-tag"
+        required: false
         default: "latest"
         type: string
-      publish_release:
-        description: "Publish release"
-        required: false
-        default: true
-        type: boolean
 
 jobs:
   build:
-    strategy:
-      matrix:
-        platform: [android]
-        arch: [arm64, x64, arm]
-    runs-on: ubuntu-22.04
-    outputs:
-      module_version: ${{ steps.prebuild.outputs.module_version }}
-    steps:
-      - uses: actions/checkout@v6
-      - id: prebuild
-        uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@main
-        with:
-          module_name: quickbit-native
-          module_version: ${{ inputs.module_version }}
-          platform: ${{ matrix.platform }}
-          arch: ${{ matrix.arch }}
-          patch_file: CMakeLists.txt.patch
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v2
+    with:
+      module_name: sodium-native
+      module_version: ${{ inputs.module_version }}
+
+  test-android:
+    needs: build
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-android.yml@v2
+    with:
+      module_spec: ${{ needs.build.outputs.module_spec }}
+      test_runner: module
+      git_repo_slug: ${{ needs.build.outputs.git_repo_slug }}
+      git_ref: ${{ needs.build.outputs.git_ref }}
+
+  test-ios:
+    needs: build
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-ios.yml@v2
+    with:
+      module_spec: ${{ needs.build.outputs.module_spec }}
+      test_runner: module
+      git_repo_slug: ${{ needs.build.outputs.git_repo_slug }}
+      git_ref: ${{ needs.build.outputs.git_ref }}
 
   release:
-    if: ${{ inputs.publish_release }}
-    needs: build
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/release.yml@main
+    needs: [ build, test-android, test-ios ]
+    permissions:
+      contents: write
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/release.yml@v2
     with:
-      module_version: ${{ needs.build.outputs.module_version }}
+      module_spec: ${{ needs.build.outputs.module_spec }}
 ```
 
 ### Inputs
 
-| Input            | Required | Default   | Description                                                          |
-| ---------------- | -------- | --------- | -------------------------------------------------------------------- |
-| `module_name`    | yes      | —         | Name of the npm module to prebuild                                   |
-| `platform`       | yes      | `android` | Target platform                                                      |
-| `arch`           | yes      | `arm64`   | Target architecture (`arm64`, `x64`, `arm`)                          |
-| `module_version` | no       | `latest`  | Version of the module to pull from npm                               |
-| `patch_file`     | no       | —         | Path to a patch file in the caller's workspace to apply to `package` |
-| `node_version`   | no       | `18`      | Node.js version used to run `bare-make`                              |
+**`prebuild-all.yml` / `prebuild.yml`**
+
+| Input            | Required | Default    | Description                                                                       |
+| ---------------- | -------- | ---------- | --------------------------------------------------------------------------------- |
+| `module_name`    | yes      | —          | npm module to build                                                               |
+| `module_version` | no       | `latest`   | Exact version or dist-tag. Resolved against npm before the matrix runs.           |
+| `patches_dir`    | no       | `patches`  | Directory in the caller repo holding `<module>+<version>.patch` files (see below) |
 
 ### Outputs
 
-| Output           | Description                                   |
-| ---------------- | --------------------------------------------- |
-| `module_version` | The resolved version read from `package.json` |
+**`prebuild-all.yml`**
+
+| Output           | Description                                                                                   |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `module_version` | The exact version resolved and used for all builds                                            |
+| `module_spec`    | `<module>@<version>` — pass to `test-*.yml` / `release.yml`                                   |
+| `git_repo_slug`  | `owner/repo` of the upstream GitHub repo, or empty if not on GitHub / no `repository.url`    |
+| `git_ref`        | Commit SHA (from `gitHead`) or `v<version>` tag, or empty if neither resolves                |
 
 ### Manual dispatch
 
-The `.github/workflows/prebuild.yml` workflow in this repository is kept as a
-thin wrapper around the composite action so the build can be triggered manually
-from the Actions tab for debugging.
+`prebuild.yml` is a thin wrapper around the composite action for single-target
+builds, triggerable from the Actions tab for debugging. `test.yml` chains
+`prebuild → test-*` for end-to-end debugging on a branch.
 
 ## Testing prebuilds on an emulator / simulator
 
 Two reusable workflows run the built `.node` file inside nodejs-mobile on a
 real emulator / simulator to catch runtime issues the prebuild step cannot
 (wrong page size, missing symbols, `require-addon` not finding the binary,
-etc.).
+etc.). The workflow bundles a `test.js` and the installed module into a
+minimal native app, installs it on an emulator / simulator, streams the app's
+stdout into the workflow log, and passes/fails on the Node exit code.
 
-The caller's repo provides a `test.js` that outputs TAP; the workflow bundles
-it with the artifact and the module-under-test into a minimal native app,
-installs it on an emulator / simulator, streams the app's stdout into the
-workflow log, and passes/fails on the Node exit code.
+Three `test_runner` modes, selected per test workflow:
 
-If `test_script` is omitted, a minimal smoke test is generated that just does
-`require('<module_name>')` and exits non-zero if it throws — enough to catch
-linker / load-time breakage without the caller needing to write any JS.
+- **`smoke`** (default): generated test that just `require()`s the module.
+  Enough to catch linker / load-time breakage without caller JS.
+- **`module`**: runs the module's own `test/*.js` via `brittle`. See below.
+- **`custom`**: uses the file at `test_script` (caller-repo path).
 
-```yaml
-jobs:
-  build-android-x64:
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild.yml@main
-    with:
-      module_name: sodium-native
-      platform: android
-      arch: x64
+### Running the module's own test suite
 
-  test-android:
-    needs: build-android-x64
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-android.yml@main
-    with:
-      module_name: sodium-native
-      module_version: ${{ needs.build-android-x64.outputs.module_version }}
-      artifact_name: sodium-native-${{ needs.build-android-x64.outputs.module_version }}-android-x64
-      target: android-x64    # the prebuilds/<dir>/ to install into
-      # test_script: test.js   # omit to get a default require() smoke test   # caller-repo path; outputs TAP on stdout
+The `test/` folder is usually excluded from npm tarballs (via `.npmignore` or
+the package's `files` field), so the test workflows check out the upstream
+GitHub repo separately and overlay its `test/` into
+`node_modules/<module>/test/` before running.
 
-  build-ios-sim-arm64:
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild.yml@main
-    with:
-      module_name: sodium-native
-      platform: ios
-      arch: arm64
-      simulator: true
+The git ref is resolved in `prebuild-all.yml`'s `resolve` job:
 
-  test-ios:
-    needs: build-ios-sim-arm64
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-ios.yml@main
-    with:
-      module_name: sodium-native
-      module_version: ${{ needs.build-ios-sim-arm64.outputs.module_version }}
-      artifact_name: sodium-native-${{ needs.build-ios-sim-arm64.outputs.module_version }}-ios-arm64-simulator
-      # At runtime on the simulator nodejs-mobile reports platform+arch as
-      # 'ios-arm64' (no -simulator suffix), so the .node file is installed
-      # under prebuilds/ios-arm64/. Leave `target` at its default.
-      # test_script: test.js   # omit to get a default require() smoke test
+1. **`gitHead` from npm metadata** — recorded by `npm publish` and usually
+   reliable for modern publishes. This is a commit SHA; `actions/checkout`
+   accepts bare SHAs even when the commit isn't reachable from a branch
+   (e.g. after a force-push).
+2. **`v<version>` tag** — checked via the GitHub API (authenticated with
+   `GITHUB_TOKEN`). Fallback for older tarballs with missing `gitHead`.
+3. **Empty** — no git source available. `test_runner: module` will fail
+   loudly at test time; use `smoke` instead.
+
+Pass both `git_repo_slug` and `git_ref` from `prebuild-all.yml`'s outputs into
+the test workflows when using `test_runner: module`. Non-GitHub upstreams are
+not supported in v2.
+
+**Note:** the build always uses the npm tarball as its source. The git
+checkout is only used to populate the `test/` folder for the `module` test
+runner.
+
+## Patching the module before build
+
+Some modules need small patches to build for nodejs-mobile — e.g. fixing an
+include path in `CMakeLists.txt`. Patches use the
+[patch-package](https://github.com/ds300/patch-package) filename convention:
+
+```
+<caller-repo>/
+└── patches/
+    ├── quickbit-native+2.4.1.patch
+    └── quickbit-native+2.4.2.patch
 ```
 
-The native shells used by the test workflows live under
-[test-harness/android/](test-harness/android/) and
-[test-harness/ios/](test-harness/ios/). They each load the module-under-test,
-run `test.js` as the main script, pipe stdout/stderr back to the workflow log
-(logcat on Android, `simctl launch --console-pty` on iOS), and emit a
-`__NODE_EXIT__:<code>` sentinel the workflow parses to set pass/fail.
+The prebuild step picks `patches/<module_name>+<resolved_version>.patch` and
+applies it with `patch -p1 --forward --no-backup-if-mismatch` after `npm pack`
+unpack and before `npm install`.
 
-### Manual dispatch
+**Failure modes:**
+- Patch applies cleanly → build proceeds.
+- No `<module>+*.patch` files exist → no-op, build proceeds.
+- A matching file is missing but siblings for other versions exist → **fail
+  loudly**. This catches the usual error of forgetting to rename the patch
+  after bumping `module_version`.
+- Patch applies but with fuzz/rejects → **fail loudly** (`--forward`
+  suppresses the interactive prompt and surfaces rejects as a non-zero exit).
 
-The [.github/workflows/test.yml](.github/workflows/test.yml) workflow chains
-`prebuild.yml` → `test-*.yml` behind a `workflow_dispatch` trigger so the whole
-pipeline can be exercised from the Actions tab without a caller repo. The
-harness is checked out at the same commit as the dispatch run, so in-flight
-changes on a branch are tested as-is. Platforms can be selected individually
-or together.
+To use a different directory name, pass `patches_dir:` to
+`prebuild-all.yml` / `prebuild.yml`.
 
 ## Contributing
 

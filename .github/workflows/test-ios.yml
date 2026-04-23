@@ -59,6 +59,23 @@ on:
         description: "Ref of digidem/nodejs-mobile-bare-prebuilds to pull the harness from"
         required: false
         default: "main"
+      git_repo_slug:
+        type: string
+        description: |
+          'owner/repo' for the module's upstream GitHub repo. Output by
+          prebuild-all.yml. Used with `git_ref` to check out the module's
+          `test/` folder for `test_runner: module` (the npm tarball
+          typically omits tests).
+        required: false
+        default: ""
+      git_ref:
+        type: string
+        description: |
+          Git ref (commit SHA or tag name) to check out the upstream repo
+          at. Output by prebuild-all.yml. Accepted by `actions/checkout`'s
+          `ref:` input. Only used when `test_runner` is 'module'.
+        required: false
+        default: ""
 
 jobs:
   test:
@@ -117,6 +134,8 @@ jobs:
           artifact_name: ${{ inputs.artifact_name }}
           test_runner: ${{ inputs.test_runner }}
           test_script: ${{ inputs.test_script }}
+          git_repo_slug: ${{ inputs.git_repo_slug }}
+          git_ref: ${{ inputs.git_ref }}
           nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/ios/nodejs-project
 
       - name: Build TestHarness.app

@@ -7,7 +7,8 @@ description: |
 
   Three test-runner modes (selected by `test_runner`):
   - 'smoke'  (default): generated test that just `require()`s the module.
-  - 'module': runs the module's own `test/*.js` via brittle.
+  - 'module': runs the module's own `test/*.js` (test folder + devDeps
+              pulled from the upstream repo + tarball's package.json).
   - 'custom': copies the caller's `test_script` in as test.js.
 
   Requires `node`/`npm` on PATH — add an `actions/setup-node` step before
@@ -40,7 +41,10 @@ inputs:
     description: |
       One of 'smoke' (default), 'module', or 'custom'.
       - 'smoke':  auto-generated test that just require()s the module.
-      - 'module': runs the module's own test/*.js (requires brittle).
+      - 'module': runs the module's own test/*.js; devDeps installed
+                  from the tarball's package.json so any test runner
+                  the module uses (brittle / tape / tap / ...) is
+                  available at require() time.
       - 'custom': uses the file pointed to by `test_script`.
     required: false
     default: "smoke"
@@ -48,6 +52,22 @@ inputs:
     description: |
       Path to a caller-provided test script (relative to $GITHUB_WORKSPACE).
       Only used when test_runner is 'custom'.
+    required: false
+    default: ""
+  git_repo_slug:
+    description: |
+      'owner/repo' for the module's upstream GitHub repo. Combined with
+      `git_ref`, used to check out the upstream `test/` folder and overlay
+      it into `node_modules/<module>/test/` — the npm tarball typically
+      omits tests via .npmignore. Only consulted when test_runner is
+      'module'.
+    required: false
+    default: ""
+  git_ref:
+    description: |
+      Commit SHA or tag name to check out the upstream repo at. Accepted
+      by `actions/checkout`'s `ref:` input. Only consulted when
+      test_runner is 'module'.
     required: false
     default: ""
   nodejs_project_dir:
@@ -94,7 +114,6 @@ runs:
         MODULE_VERSION: ${{ steps.spec.outputs.module_version }}
         TARGET: ${{ inputs.target }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
-        TEST_RUNNER: ${{ inputs.test_runner }}
       run: |
         set -euo pipefail
         mkdir -p "$NODEDIR"
@@ -103,18 +122,83 @@ runs:
           npm init -y >/dev/null
           npm install --ignore-scripts --no-audit --no-fund \
             "${MODULE_NAME}@${MODULE_VERSION}"
-          # The module's own test files are in the npm tarball but brittle
-          # (a devDep) isn't pulled in by `npm install <pkg>`. Install it
-          # alongside when we're going to run the module's tests.
-          if [ "$TEST_RUNNER" = "module" ]; then
-            npm install --ignore-scripts --no-audit --no-fund --no-save brittle
-          fi
         )
         dst="$NODEDIR/node_modules/${MODULE_NAME}/prebuilds/${TARGET}"
         mkdir -p "$dst"
         cp "$RUNNER_TEMP"/prebuild/*.node "$dst/"
         echo "Prebuild placed under $dst:"
         ls -la "$dst"
+
+    # The `module` test_runner runs the module's own test/*.js,
+    # but npm tarballs almost always exclude test/ (via .npmignore or the
+    # package's `files` field). Check out the upstream repo pinned to the
+    # SHA/tag resolved from npm metadata and copy its test/ directory into
+    # node_modules/<module>/test/. Also pull package-lock.json so the
+    # devDep install below can use `npm ci` for deterministic versions.
+    - name: Checkout upstream test/ folder (+ lockfile)
+      if: ${{ inputs.test_runner == 'module' && inputs.git_ref != '' }}
+      uses: actions/checkout@v6
+      with:
+        repository: ${{ inputs.git_repo_slug }}
+        ref: ${{ inputs.git_ref }}
+        path: upstream-src
+        sparse-checkout: |
+          test
+          package-lock.json
+        sparse-checkout-cone-mode: false
+        fetch-depth: 1
+
+    - name: Overlay upstream test/ (and lockfile) into node_modules
+      if: ${{ inputs.test_runner == 'module' && inputs.git_ref != '' }}
+      shell: bash
+      env:
+        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        NODEDIR: ${{ inputs.nodejs_project_dir }}
+      run: |
+        set -eu
+        src_test="${GITHUB_WORKSPACE}/upstream-src/test"
+        if [ ! -d "$src_test" ]; then
+          echo "::error::Upstream checkout has no test/ directory at ${src_test}"
+          exit 1
+        fi
+        mod="${NODEDIR}/node_modules/${MODULE_NAME}"
+        rm -rf "$mod/test"
+        cp -R "$src_test" "$mod/test"
+        echo "Overlaid upstream test/ → ${mod}/test"
+
+        # Optional: copy lockfile so the devDep install step can use `npm ci`.
+        # Absent on some older repos / monorepo subdirs; npm install handles
+        # that case.
+        src_lock="${GITHUB_WORKSPACE}/upstream-src/package-lock.json"
+        if [ -f "$src_lock" ]; then
+          cp "$src_lock" "$mod/package-lock.json"
+          echo "Copied upstream package-lock.json → ${mod}/package-lock.json"
+        fi
+
+    # Install the module's devDependencies so its tests can require() whatever
+    # test runner + fixture libs the maintainer uses (brittle / tape / tap /
+    # etc.). Reads the package.json that shipped in the npm tarball, so the
+    # devDep set matches exactly what was published. Uses `npm ci` when the
+    # lockfile is present (deterministic), else falls back to `npm install`.
+    # No brittle-specific shortcut — if this fails, we fail; better to know
+    # than to quietly run against the wrong deps.
+    - name: Install module devDependencies
+      if: ${{ inputs.test_runner == 'module' }}
+      shell: bash
+      env:
+        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        NODEDIR: ${{ inputs.nodejs_project_dir }}
+      run: |
+        set -eu
+        mod="${NODEDIR}/node_modules/${MODULE_NAME}"
+        cd "$mod"
+        if [ -f package-lock.json ]; then
+          echo "npm ci in $(pwd) (using upstream package-lock.json)"
+          npm ci --ignore-scripts --no-audit --no-fund
+        else
+          echo "npm install in $(pwd) (no lockfile)"
+          npm install --ignore-scripts --no-audit --no-fund --no-save
+        fi
 
     - name: Place main.js and test.js
       shell: bash
@@ -141,7 +225,7 @@ runs:
             template="$ACTION_PATH/module-tests-runner.js"
             esc=$(printf '%s' "$MODULE_NAME" | sed 's/[\\/&]/\\&/g')
             sed "s/__MODULE_NAME__/$esc/g" "$template" > "$NODEDIR/test.js"
-            echo "test_runner=module: running ${MODULE_NAME}'s own test/*.js via brittle."
+            echo "test_runner=module: running ${MODULE_NAME}'s own test/*.js."
             ;;
           custom)
             if [ -z "$TEST_SCRIPT" ]; then
