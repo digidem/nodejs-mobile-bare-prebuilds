@@ -10,6 +10,7 @@ by the Holepunch team. These modules are built using
 - [Usage](#usage)
   - [Inputs](#inputs)
   - [Outputs](#outputs)
+  - [Pinning](#pinning)
   - [Manual dispatch](#manual-dispatch)
 - [Testing prebuilds on an emulator / simulator](#testing-prebuilds-on-an-emulator--simulator)
   - [Running the module's own test suite](#running-the-modules-own-test-suite)
@@ -125,6 +126,23 @@ jobs:
 | `module_spec`    | `<module>@<version>` — pass to `test-*.yml` / `release.yml`                                   |
 | `git_repo_slug`  | `owner/repo` of the upstream GitHub repo, or empty if not on GitHub / no `repository.url`    |
 | `git_ref`        | Commit SHA (from `gitHead`) or `v<version>` tag, or empty if neither resolves                |
+
+### Pinning
+
+The reusable workflows internally check out this repo at `github.workflow_sha`
+— the same commit the caller referenced. That means **whatever ref a caller
+pins to gets applied consistently across the reusable workflow, the composite
+action, and the test harness**:
+
+| `uses: …@<ref>`    | Behaviour                                                      | Recommended for                             |
+| ------------------ | -------------------------------------------------------------- | ------------------------------------------- |
+| `@main`            | Bleeding edge; breaks freely                                   | Debugging only                              |
+| `@v2` _(floating)_ | Latest within the v2 major; gets forward-compatible fixes      | **Default choice**                          |
+| `@v2.1.0`          | Fully frozen (workflow + action + harness all at v2.1.0)       | Production pipelines that want zero drift  |
+| `@<sha>`           | Bit-exact reproducibility                                      | Supply-chain-sensitive consumers            |
+
+A new major (breaking inputs or outputs) bumps to `v3` and gets a new floating
+`v3` tag. `v2` stays alive for a grace period so consumers can migrate.
 
 ### Manual dispatch
 

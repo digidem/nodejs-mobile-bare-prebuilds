@@ -1,12 +1,12 @@
 name: End-to-end test (manual dispatch)
 
-# Manual wrapper that chains prebuild -> test for one or both platforms so the
-# whole pipeline can be exercised from the Actions tab without needing to call
-# these reusable workflows from another repo.
+# Manual wrapper that chains prebuild -> test for one or both platforms so
+# the whole pipeline can be exercised from the Actions tab without needing
+# to call these reusable workflows from another repo.
 #
-# The harness is always checked out at the same commit as this dispatch run
-# (`harness_ref: ${{ github.sha }}`), so in-flight changes to the harness or
-# the composite action are tested as-is on the triggering branch.
+# The reusable workflows auto-pin their internal checkouts to their own
+# commit (`github.workflow_sha`), so in-flight changes on the triggering
+# branch are tested as-is without any extra ref plumbing.
 
 on:
   workflow_dispatch:
@@ -59,7 +59,6 @@ jobs:
     with:
       module_spec: ${{ needs.build-android.outputs.module_spec }}
       test_script: ${{ inputs.test_script }}
-      harness_ref: ${{ github.sha }}
 
   build-ios:
     if: ${{ inputs.platforms == 'both' || inputs.platforms == 'ios' }}
@@ -79,4 +78,3 @@ jobs:
     with:
       module_spec: ${{ needs.build-ios.outputs.module_spec }}
       test_script: ${{ inputs.test_script }}
-      harness_ref: ${{ github.sha }}
