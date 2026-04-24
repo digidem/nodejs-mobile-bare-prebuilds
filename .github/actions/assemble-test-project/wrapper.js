@@ -16,19 +16,11 @@ process.on('exit', (code) => {
 // preload.js installs the require() patch that makes require('<module>')
 // return a pre-dlopen'd handle. Must run before test.js — which loads the
 // module under test — so the patch is in place when that require() fires.
-//
-// Errors are routed through stdout instead of stderr: on Android the
-// native host pipes stdout→logcat(INFO) and stderr→logcat(ERROR) via
-// separate pump threads, and then calls System.exit() immediately after
-// node::Start() returns. The `__NODE_EXIT__:` sentinel (written through
-// stdout in the exit handler above) is known to survive that race; the
-// stderr pump sometimes loses its tail. Writing errors to stdout here
-// guarantees they show up before the sentinel.
 try {
   require('./preload.js')
   require('./test.js')
 } catch (err) {
   const msg = err && (err.stack || err.message) || String(err)
-  process.stdout.write('HARNESS_ERROR: ' + msg + '\n')
+  process.stderr.write('HARNESS_ERROR: ' + msg + '\n')
   process.exit(1)
 }

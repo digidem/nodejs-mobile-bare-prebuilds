@@ -49,11 +49,29 @@ static int start_redirecting_stdout_stderr() {
     if (pipe(pipe_stderr) != 0) return -1;
     dup2(pipe_stderr[1], STDERR_FILENO);
 
+    // Kept joinable (no pthread_detach) so drain_stdio_pumps() below can
+    // wait for them to flush before the Java side calls System.exit().
     if (pthread_create(&thread_stdout, 0, thread_stdout_func, 0) != 0) return -1;
-    pthread_detach(thread_stdout);
     if (pthread_create(&thread_stderr, 0, thread_stderr_func, 0) != 0) return -1;
-    pthread_detach(thread_stderr);
     return 0;
+}
+
+// Closes both copies of the write-end of each stdio pipe so the pump
+// threads' read() returns 0 (EOF), joins the threads, and only returns
+// once every queued log line has been __android_log_write()'n. Without
+// this, System.exit() from the Java side races the pumps and the final
+// stderr output (often the uncaught-exception traceback we most need)
+// is lost.
+static void drain_stdio_pumps() {
+    // After dup2(pipe_*[1], STD*_FILENO), the pipe's write-end has two
+    // descriptors pointing at it (FD 1/2 and pipe_*[1]); both must be
+    // closed for read() on the other end to EOF.
+    close(STDOUT_FILENO);
+    close(pipe_stdout[1]);
+    close(STDERR_FILENO);
+    close(pipe_stderr[1]);
+    pthread_join(thread_stdout, NULL);
+    pthread_join(thread_stderr, NULL);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -89,6 +107,9 @@ Java_com_digidem_nodejstest_TestActivity_startNodeWithArguments(
 
     int rc = node::Start(argc, argv);
     free(args_buffer);
+    // Block until the pump threads have delivered every buffered line to
+    // logcat. Must run before the caller's System.exit().
+    drain_stdio_pumps();
     return (jint)rc;
 }
 
