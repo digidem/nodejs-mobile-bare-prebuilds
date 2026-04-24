@@ -1,9 +1,13 @@
 name: "Assemble nodejs-project for testing"
 description: |
   Parses `module_spec` into name + version, downloads the prebuild artifact,
-  installs the module under test into a `nodejs-project/` tree, drops the
-  prebuilt `.node` files into `node_modules/<module>/prebuilds/<target>/`,
-  and places a `main.js` entry point.
+  installs the module under test into a `nodejs-project/` tree, and packages
+  the addon for the platform's runtime loader:
+    - android: .node copied to jniLibs/<abi>/lib<name>.so (mmap'd from APK)
+    - ios:     .node wrapped into <name>.xcframework, embedded & signed
+  Writes an `addon-manifest.json` the preload script reads at runtime; the
+  preload patches require() so `require('<module>')` returns a pre-dlopen'd
+  handle instead of the module's own loader walking node_modules/prebuilds/.
 
   Three test-runner modes (selected by `test_runner`):
   - 'smoke'  (default): generated test that just `require()`s the module.
@@ -12,17 +16,24 @@ description: |
   - 'custom': copies the caller's `test_script` in as test.js.
 
   Requires `node`/`npm` on PATH — add an `actions/setup-node` step before
-  calling this action.
+  calling this action. iOS also needs `xcodebuild` (macOS runner).
 
 inputs:
   module_spec:
     description: "'<module_name>@<version>' (npm spec format, e.g. 'sodium-native@5.1.0')"
     required: true
+  platform:
+    description: |
+      'android' or 'ios' — selects the runtime packaging shape
+      (jniLibs/lib*.so for android, *.xcframework for ios) and the
+      manifest value `preload.js` reads at runtime.
+    required: true
   target:
     description: |
-      The `prebuilds/<dir>/` subfolder to install the .node file into.
-      This is what the runtime loader (require-addon / bare-addon-resolve)
-      will look for at `process.platform + '-' + process.arch`.
+      The prebuild artifact's platform/arch tuple (e.g. 'android-x64',
+      'android-arm64', 'ios-arm64'). Determines the default artifact name
+      and — on Android — the ABI dir the .node is renamed into
+      (android-x64 → x86_64, android-arm64 → arm64-v8a).
     required: true
   artifact_suffix:
     description: |
@@ -116,12 +127,11 @@ runs:
         name: ${{ steps.spec.outputs.artifact_name }}
         path: ${{ runner.temp }}/prebuild
 
-    - name: Install module and place prebuild
+    - name: Install module (without prebuild)
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
         MODULE_VERSION: ${{ steps.spec.outputs.module_version }}
-        TARGET: ${{ inputs.target }}
         NODEDIR: ${{ inputs.nodejs_project_dir }}
       run: |
         set -euo pipefail
@@ -132,11 +142,96 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund \
             "${MODULE_NAME}@${MODULE_VERSION}"
         )
-        dst="$NODEDIR/node_modules/${MODULE_NAME}/prebuilds/${TARGET}"
-        mkdir -p "$dst"
-        cp "$RUNNER_TEMP"/prebuild/*.node "$dst/"
-        echo "Prebuild placed under $dst:"
-        ls -la "$dst"
+        # The .node file does NOT go into node_modules/<module>/prebuilds/
+        # any more; runtime packaging below handles it. If the tarball
+        # shipped stray .node files, leave them — the preload patch wins
+        # by intercepting the bare-name require() before the module's own
+        # loader walks prebuilds/.
+
+    # Android packaging: each .node is renamed to lib<basename>.so and
+    # placed in jniLibs/<abi>/. Android's package installer drops files
+    # not matching `lib*.so`, so the prefix is required.
+    - name: Place addons as jniLibs (android)
+      if: ${{ inputs.platform == 'android' }}
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+        NODEDIR: ${{ inputs.nodejs_project_dir }}
+      run: |
+        set -euo pipefail
+        case "$TARGET" in
+          android-x64)   ABI=x86_64 ;;
+          android-arm64) ABI=arm64-v8a ;;
+          android-arm)   ABI=armeabi-v7a ;;
+          *)
+            echo "::error::Unsupported android target '$TARGET'"; exit 1 ;;
+        esac
+        # nodejs_project_dir layout: .../app/src/main/assets/nodejs-project
+        # jniLibs lives a sibling of assets/: .../app/src/main/jniLibs
+        jni="$(cd "$NODEDIR/../.." && pwd)/jniLibs/$ABI"
+        mkdir -p "$jni"
+        shopt -s nullglob
+        for f in "$RUNNER_TEMP"/prebuild/*.node; do
+          base="$(basename "$f" .node)"
+          cp "$f" "$jni/lib${base}.so"
+        done
+        echo "Addons placed under $jni:"
+        ls -la "$jni"
+
+    # iOS packaging: each .node is wrapped into a minimal single-slice
+    # .xcframework so Xcode's Embed & Sign phase can handle it. Run script
+    # in the pbxproj copies the matching slice into the .app at build time.
+    - name: Wrap addons as xcframeworks (ios)
+      if: ${{ inputs.platform == 'ios' }}
+      shell: bash
+      env:
+        NODEDIR: ${{ inputs.nodejs_project_dir }}
+      run: |
+        set -euo pipefail
+        # nodejs_project_dir layout: .../ios/nodejs-project
+        # addons/ dir lives alongside it: .../ios/addons
+        addons_root="$(cd "$NODEDIR/.." && pwd)/addons"
+        rm -rf "$addons_root"
+        mkdir -p "$addons_root"
+
+        shopt -s nullglob
+        for node_file in "$RUNNER_TEMP"/prebuild/*.node; do
+          base="$(basename "$node_file" .node)"
+          work="$(mktemp -d)"
+          fw="$work/$base.framework"
+          mkdir -p "$fw"
+          cp "$node_file" "$fw/$base"
+          # Rewrite the Mach-O install name so the loader resolves via
+          # @rpath at runtime (app's LD_RUNPATH_SEARCH_PATHS includes
+          # @executable_path/Frameworks by default).
+          install_name_tool -id "@rpath/$base.framework/$base" "$fw/$base"
+          cat > "$fw/Info.plist" <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0"><dict>
+          <key>CFBundleDevelopmentRegion</key><string>en</string>
+          <key>CFBundleExecutable</key><string>$base</string>
+          <key>CFBundleIdentifier</key><string>com.digidem.$base</string>
+          <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+          <key>CFBundleName</key><string>$base</string>
+          <key>CFBundlePackageType</key><string>FMWK</string>
+          <key>CFBundleShortVersionString</key><string>1.0</string>
+          <key>CFBundleVersion</key><string>1</string>
+          <key>MinimumOSVersion</key><string>13.0</string>
+        </dict></plist>
+        PLIST
+          xcodebuild -create-xcframework \
+            -framework "$fw" \
+            -output "$addons_root/$base.xcframework"
+        done
+        echo "Addons wrapped under $addons_root:"
+        ls -la "$addons_root"
+
+        # Strip any stray .node files from the staged JS tree so Xcode's
+        # folder-reference "Copy Bundle Resources" phase doesn't embed
+        # them into the .app (which would break codesigning on device
+        # builds and is always dead weight).
+        find "$NODEDIR/node_modules" -name '*.node' -print -delete || true
 
     # The `module` test_runner runs the module's own tests, but npm tarballs
     # almost always exclude them (via .npmignore or the package's `files`
@@ -231,7 +326,49 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund --no-save
         fi
 
-    - name: Place main.js, test.js, and harness-config.json
+    # Writes addon-manifest.json consumed by preload.js at runtime. Each
+    # entry maps the npm module name to the on-disk filename inside
+    # NATIVE_LIB_DIR (lib<name>.so on android, <name>.xcframework on ios).
+    # We only have one addon in the test harness — the module under test —
+    # so a single-entry manifest is enough. Filename is derived from the
+    # prebuild artifact's .node basename, not the module name, because
+    # some modules (bare-subprocess etc.) ship prebuilds with a different
+    # short name than the npm package.
+    - name: Write addon-manifest.json
+      shell: bash
+      env:
+        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        PLATFORM: ${{ inputs.platform }}
+        NODEDIR: ${{ inputs.nodejs_project_dir }}
+      run: |
+        set -euo pipefail
+        # Pick the first .node basename as the canonical addon filename.
+        # (Most prebuilds ship exactly one.) Fail loudly if none present.
+        first_node="$(ls "$RUNNER_TEMP"/prebuild/*.node 2>/dev/null | head -1 || true)"
+        if [ -z "$first_node" ]; then
+          echo "::error::No .node files in prebuild artifact"; exit 1
+        fi
+        base="$(basename "$first_node" .node)"
+        case "$PLATFORM" in
+          android) file="lib${base}.so" ;;
+          ios)     file="${base}.xcframework" ;;
+          *) echo "::error::Unknown platform '$PLATFORM'"; exit 1 ;;
+        esac
+        MANIFEST_PLATFORM="$PLATFORM" MANIFEST_FILE="$file" node -e '
+          const fs = require("fs")
+          const path = require("path")
+          const manifest = {
+            platform: process.env.MANIFEST_PLATFORM,
+            addons: { [process.env.MODULE_NAME]: process.env.MANIFEST_FILE }
+          }
+          fs.writeFileSync(
+            path.join(process.env.NODEDIR, "addon-manifest.json"),
+            JSON.stringify(manifest, null, 2) + "\n"
+          )
+        '
+        cat "$NODEDIR/addon-manifest.json"
+
+    - name: Place main.js, test.js, preload.js, harness-config.json
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
@@ -242,9 +379,11 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # main.js is always the wrapper: installs the exit-sentinel handler
-        # and delegates to ./test.js.
+        # main.js is always the wrapper: installs the exit-sentinel handler,
+        # runs preload.js (dlopens addons + patches require()), then hands
+        # off to ./test.js.
         cp "$ACTION_PATH/wrapper.js" "$NODEDIR/main.js"
+        cp "$ACTION_PATH/preload.js" "$NODEDIR/preload.js"
 
         # The 'smoke' and 'module' runners read their config (module name,
         # exclude list) from this JSON file at runtime — so the templates are

@@ -3,7 +3,7 @@
 
     <application
         android:label="nodejs-test"
-        android:extractNativeLibs="true"
+        android:extractNativeLibs="false"
         android:hasCode="true">
         <activity
             android:name=".TestActivity"

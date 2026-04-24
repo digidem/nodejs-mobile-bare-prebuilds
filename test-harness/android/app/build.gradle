@@ -32,8 +32,10 @@ android {
 
     sourceSets {
         main {
-            // libnode/bin/<abi>/libnode.so is populated at CI time
-            jniLibs.srcDirs 'libnode/bin/'
+            // libnode/bin/<abi>/libnode.so is populated at CI time;
+            // addon lib<name>.so files are written to src/main/jniLibs/<abi>
+            // by the assemble-test-project action.
+            jniLibs.srcDirs 'libnode/bin/', 'src/main/jniLibs/'
         }
     }
 
@@ -46,8 +48,10 @@ android {
 
     packagingOptions {
         jniLibs {
-            // libnode.so is large; don't compress so it can be mmap'd
-            useLegacyPackaging true
+            // Uncompressed / page-aligned so the loader can mmap the .so
+            // directly from the APK. Requires
+            // android:extractNativeLibs="false" in the manifest.
+            useLegacyPackaging false
         }
     }
 }

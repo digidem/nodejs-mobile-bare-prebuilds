@@ -161,6 +161,7 @@ jobs:
         uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/assemble-test-project
         with:
           module_spec: ${{ inputs.module_spec }}
+          platform: android
           target: ${{ inputs.target }}
           artifact_name: ${{ inputs.artifact_name }}
           test_runner: ${{ inputs.test_runner }}
@@ -169,6 +170,18 @@ jobs:
           git_repo_slug: ${{ inputs.git_repo_slug }}
           git_ref: ${{ inputs.git_ref }}
           nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/android/app/src/main/assets/nodejs-project
+
+      # Sanity check: the addon .so must land where gradle's jniLibs.srcDirs
+      # expects it, otherwise the APK will ship without the addon and the
+      # dlopen() at runtime will fail with a confusing ENOENT.
+      - name: Verify jniLibs layout
+        working-directory: .nodejs-mobile-bare-prebuilds/test-harness/android
+        run: |
+          set -eu
+          find app/src/main/jniLibs -type f -name '*.so' -print
+          if ! find app/src/main/jniLibs -type f -name 'lib*.so' ! -name 'libnode.so' | grep -q .; then
+            echo "::error::No addon lib*.so files found in jniLibs"; exit 1
+          fi
 
       - uses: gradle/actions/setup-gradle@50e97c2cd7a37755bbfafc9c5b7cafaece252f6e # v6.1.0
         with:

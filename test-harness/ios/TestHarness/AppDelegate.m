@@ -25,6 +25,12 @@
     setvbuf(stdout, NULL, _IOLBF, 0);
     setvbuf(stderr, NULL, _IOLBF, 0);
 
+    // preload.js reads NATIVE_LIB_DIR at startup to dlopen each addon
+    // out of <app>.app/Frameworks/<name>.framework (populated by the
+    // Embed Addons Run Script build phase in the pbxproj).
+    NSString* fwPath = [[NSBundle mainBundle].bundlePath stringByAppendingPathComponent:@"Frameworks"];
+    setenv("NATIVE_LIB_DIR", fwPath.UTF8String, 1);
+
     NSThread* nodejsThread = [[NSThread alloc]
         initWithTarget:self
         selector:@selector(startNode)

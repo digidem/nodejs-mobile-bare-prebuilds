@@ -137,6 +137,7 @@ jobs:
         uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/assemble-test-project
         with:
           module_spec: ${{ inputs.module_spec }}
+          platform: ios
           target: ${{ inputs.target }}
           artifact_suffix: "-simulator"
           artifact_name: ${{ inputs.artifact_name }}

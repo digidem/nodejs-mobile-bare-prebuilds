@@ -1,0 +1,7 @@
+# Populated by the assemble-test-project composite action at CI time
+# (one .xcframework per addon wrapped from the .node prebuild).
+test-harness/ios/addons/
+
+# jniLibs written by the action for addons under test. libnode.so lives
+# in a sibling libnode/bin/ tree that's cached separately.
+test-harness/android/app/src/main/jniLibs/

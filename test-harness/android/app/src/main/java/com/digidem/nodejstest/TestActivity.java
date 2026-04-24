@@ -3,6 +3,8 @@ package com.digidem.nodejstest;
 import android.app.Activity;
 import android.content.res.AssetManager;
 import android.os.Bundle;
+import android.system.ErrnoException;
+import android.system.Os;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -23,6 +25,20 @@ public class TestActivity extends Activity {
 
         if (_started) return;
         _started = true;
+
+        // preload.js in the nodejs-project reads NATIVE_LIB_DIR at startup
+        // to dlopen each addon (lib<name>.so) out of the APK-extracted
+        // jniLibs dir. With extractNativeLibs=false the system still
+        // reports a path under /data/app/.../lib/<abi>/ that is mmap'd
+        // directly from the APK.
+        try {
+            Os.setenv(
+                "NATIVE_LIB_DIR",
+                getApplicationInfo().nativeLibraryDir,
+                true);
+        } catch (ErrnoException e) {
+            throw new RuntimeException("failed to set NATIVE_LIB_DIR", e);
+        }
 
         final String nodeDir =
             getApplicationContext().getFilesDir().getAbsolutePath() + "/nodejs-project";

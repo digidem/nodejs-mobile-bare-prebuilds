@@ -33,6 +33,23 @@
 		};
 /* End PBXCopyFilesBuildPhase section */
 
+/* Begin PBXShellScriptBuildPhase section */
+		33C0B2B020600001006376A9 /* Embed Addons */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed Addons";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -euo pipefail\naddons_src=\"${SRCROOT}/addons\"\nif [ ! -d \"$addons_src\" ]; then\n  echo \"note: $addons_src does not exist — no addons to embed.\"\n  exit 0\nfi\nfw_dst=\"${BUILT_PRODUCTS_DIR}/${FRAMEWORKS_FOLDER_PATH}\"\nmkdir -p \"$fw_dst\"\nshopt -s nullglob\nfor xcf in \"$addons_src\"/*.xcframework; do\n  base=\"$(basename \"$xcf\" .xcframework)\"\n  slice_dir=\"\"\n  # Prefer the slice matching the current build. Harness always builds\n  # for iOS Simulator on Apple Silicon, but fall back to any arm64 slice.\n  for dir in \"$xcf\"/*/; do\n    case \"$dir\" in\n      *ios-arm64-simulator*|*ios-arm64_x86_64-simulator*)\n        slice_dir=\"$dir\"; break ;;\n      *ios-arm64*)\n        [ -z \"$slice_dir\" ] && slice_dir=\"$dir\" ;;\n    esac\n  done\n  if [ -z \"$slice_dir\" ]; then\n    echo \"error: no usable slice in $xcf\"; exit 1\n  fi\n  rm -rf \"$fw_dst/$base.framework\"\n  cp -R \"$slice_dir/$base.framework\" \"$fw_dst/$base.framework\"\n  # CODE_SIGNING_ALLOWED=NO in the harness build, so no codesign here.\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
 /* Begin PBXFileReference section */
 		33C0B28520512E17006376A9 /* TestHarness.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "TestHarness.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		33C0B28820512E17006376A9 /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
@@ -107,8 +124,9 @@
 			buildPhases = (
 				33C0B28120512E17006376A9 /* Sources */,
 				33C0B28220512E17006376A9 /* Frameworks */,
-				33C0B28320512E17006376A9 /* Resources */,
 				33C0B2A120512ECA006376A9 /* Embed Frameworks */,
+				33C0B2B020600001006376A9 /* Embed Addons */,
+				33C0B28320512E17006376A9 /* Resources */,
 			);
 			buildRules = (
 			);

@@ -13,4 +13,8 @@ process.on('exit', (code) => {
   process.stdout.write('__NODE_EXIT__:' + code + '\n')
 })
 
+// preload.js installs the require() patch that makes require('<module>')
+// return a pre-dlopen'd handle. Must run before test.js — which loads the
+// module under test — so the patch is in place when that require() fires.
+require('./preload.js')
 require('./test.js')
