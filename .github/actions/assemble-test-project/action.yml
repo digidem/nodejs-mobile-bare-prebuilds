@@ -5,7 +5,7 @@ description: |
   the addon for the platform's runtime loader:
     - android: .node copied to jniLibs/<abi>/lib<name>.so (mmap'd from APK)
     - ios:     .node wrapped into <name>.xcframework, embedded & signed
-  Writes an `addon-manifest.json` the preload script reads at runtime; the
+  Writes a `harness-config.json` the preload script reads at runtime; the
   preload patches require() so `require('<module>')` returns a pre-dlopen'd
   handle instead of the module's own loader walking node_modules/prebuilds/.
 
@@ -26,7 +26,7 @@ inputs:
     description: |
       'android' or 'ios' — selects the runtime packaging shape
       (jniLibs/lib*.so for android, *.xcframework for ios) and the
-      manifest value `preload.js` reads at runtime.
+      value `preload.js` reads from harness-config.json at runtime.
     required: true
   target:
     description: |
@@ -142,11 +142,11 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund \
             "${MODULE_NAME}@${MODULE_VERSION}"
         )
-        # The .node file does NOT go into node_modules/<module>/prebuilds/
-        # any more; runtime packaging below handles it. If the tarball
-        # shipped stray .node files, leave them — the preload patch wins
-        # by intercepting the bare-name require() before the module's own
-        # loader walks prebuilds/.
+        # The .node file is packaged by the platform-specific step below.
+        # Any .node that shipped in the tarball is stripped so the module's
+        # own loader can't find one on disk (which would bypass preload.js
+        # and produce a duplicate dlopen handle for the addon).
+        find "$NODEDIR/node_modules" -name '*.node' -print -delete || true
 
     # Android packaging: each .node is renamed to lib<basename>.so and
     # placed in jniLibs/<abi>/. Android's package installer drops files
@@ -201,10 +201,6 @@ runs:
           fw="$work/$base.framework"
           mkdir -p "$fw"
           cp "$node_file" "$fw/$base"
-          # Rewrite the Mach-O install name so the loader resolves via
-          # @rpath at runtime (app's LD_RUNPATH_SEARCH_PATHS includes
-          # @executable_path/Frameworks by default).
-          install_name_tool -id "@rpath/$base.framework/$base" "$fw/$base"
           cat > "$fw/Info.plist" <<PLIST
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -226,12 +222,6 @@ runs:
         done
         echo "Addons wrapped under $addons_root:"
         ls -la "$addons_root"
-
-        # Strip any stray .node files from the staged JS tree so Xcode's
-        # folder-reference "Copy Bundle Resources" phase doesn't embed
-        # them into the .app (which would break codesigning on device
-        # builds and is always dead weight).
-        find "$NODEDIR/node_modules" -name '*.node' -print -delete || true
 
     # The `module` test_runner runs the module's own tests, but npm tarballs
     # almost always exclude them (via .npmignore or the package's `files`
@@ -326,52 +316,11 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund --no-save
         fi
 
-    # Writes addon-manifest.json consumed by preload.js at runtime. Each
-    # entry maps the npm module name to the on-disk filename inside
-    # NATIVE_LIB_DIR (lib<name>.so on android, <name>.xcframework on ios).
-    # We only have one addon in the test harness — the module under test —
-    # so a single-entry manifest is enough. Filename is derived from the
-    # prebuild artifact's .node basename, not the module name, because
-    # some modules (bare-subprocess etc.) ship prebuilds with a different
-    # short name than the npm package.
-    - name: Write addon-manifest.json
-      shell: bash
-      env:
-        MODULE_NAME: ${{ steps.spec.outputs.module_name }}
-        PLATFORM: ${{ inputs.platform }}
-        NODEDIR: ${{ inputs.nodejs_project_dir }}
-      run: |
-        set -euo pipefail
-        # Pick the first .node basename as the canonical addon filename.
-        # (Most prebuilds ship exactly one.) Fail loudly if none present.
-        first_node="$(ls "$RUNNER_TEMP"/prebuild/*.node 2>/dev/null | head -1 || true)"
-        if [ -z "$first_node" ]; then
-          echo "::error::No .node files in prebuild artifact"; exit 1
-        fi
-        base="$(basename "$first_node" .node)"
-        case "$PLATFORM" in
-          android) file="lib${base}.so" ;;
-          ios)     file="${base}.xcframework" ;;
-          *) echo "::error::Unknown platform '$PLATFORM'"; exit 1 ;;
-        esac
-        MANIFEST_PLATFORM="$PLATFORM" MANIFEST_FILE="$file" node -e '
-          const fs = require("fs")
-          const path = require("path")
-          const manifest = {
-            platform: process.env.MANIFEST_PLATFORM,
-            addons: { [process.env.MODULE_NAME]: process.env.MANIFEST_FILE }
-          }
-          fs.writeFileSync(
-            path.join(process.env.NODEDIR, "addon-manifest.json"),
-            JSON.stringify(manifest, null, 2) + "\n"
-          )
-        '
-        cat "$NODEDIR/addon-manifest.json"
-
     - name: Place main.js, test.js, preload.js, harness-config.json
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
+        PLATFORM: ${{ inputs.platform }}
         TEST_RUNNER: ${{ inputs.test_runner }}
         TEST_SCRIPT: ${{ inputs.test_script }}
         TEST_EXCLUDE: ${{ inputs.test_exclude }}
@@ -380,27 +329,48 @@ runs:
       run: |
         set -euo pipefail
         # main.js is always the wrapper: installs the exit-sentinel handler,
-        # runs preload.js (dlopens addons + patches require()), then hands
+        # runs preload.js (dlopens the addon + patches require()), then hands
         # off to ./test.js.
         cp "$ACTION_PATH/wrapper.js" "$NODEDIR/main.js"
         cp "$ACTION_PATH/preload.js" "$NODEDIR/preload.js"
 
-        # The 'smoke' and 'module' runners read their config (module name,
-        # exclude list) from this JSON file at runtime — so the templates are
-        # plain runnable JS with no placeholder substitution.
-        node -e '
+        # Compute the on-disk filename preload.js will dlopen from
+        # NATIVE_LIB_DIR at runtime. Derived from the prebuild artifact's
+        # .node basename (not the npm name) because some modules publish
+        # prebuilds under a different short name than the package.
+        first_node="$(find "$RUNNER_TEMP/prebuild" -maxdepth 1 -name '*.node' -print -quit)"
+        if [ -z "$first_node" ]; then
+          echo "::error::No .node files in prebuild artifact"; exit 1
+        fi
+        base="$(basename "$first_node" .node)"
+        case "$PLATFORM" in
+          android) addon_filename="lib${base}.so" ;;
+          ios)     addon_filename="${base}.xcframework" ;;
+          *) echo "::error::Unknown platform '$PLATFORM'"; exit 1 ;;
+        esac
+
+        # The smoke / module runners read moduleName + testExclude; preload.js
+        # reads platform + addonFilename. One file so all the plain-JS
+        # templates can require('./harness-config.json') without wiring.
+        ADDON_FILENAME="$addon_filename" node -e '
           const fs = require("fs")
           const path = require("path")
           const testExclude = (process.env.TEST_EXCLUDE || "")
             .split(/\r?\n+/)
             .map((s) => s.trim())
             .filter(Boolean)
-          const cfg = { moduleName: process.env.MODULE_NAME, testExclude }
+          const cfg = {
+            moduleName: process.env.MODULE_NAME,
+            platform: process.env.PLATFORM,
+            addonFilename: process.env.ADDON_FILENAME,
+            testExclude
+          }
           fs.writeFileSync(
             path.join(process.env.NODEDIR, "harness-config.json"),
             JSON.stringify(cfg, null, 2) + "\n"
           )
         '
+        cat "$NODEDIR/harness-config.json"
 
         case "$TEST_RUNNER" in
           smoke)
