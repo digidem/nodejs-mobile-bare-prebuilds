@@ -193,6 +193,25 @@ jobs:
           ABI: ${{ steps.inputs.outputs.emulator_arch }}
         run: gradle -PabiFilter=${ABI} :app:assembleDebug --no-daemon
 
+      # Sanity-check what actually made it into the APK. With
+      # android:extractNativeLibs="false" + useLegacyPackaging=false the
+      # addon .so must be STORED (method 'stor') and page-aligned;
+      # otherwise PackageManager won't register it and dlopen at runtime
+      # fails with "library ... not found" even though the file shipped.
+      - name: Inspect APK jniLibs layout
+        working-directory: .nodejs-mobile-bare-prebuilds/test-harness/android
+        run: |
+          set -eu
+          apk=app/build/outputs/apk/debug/app-debug.apk
+          echo "=== All lib/ entries in APK ==="
+          unzip -l "$apk" | awk '/ lib\// {print}' || true
+          echo
+          echo "=== Compression method per lib/*.so (stor = uncompressed) ==="
+          # `unzip -v` prints a table including the compression method
+          # ('Stored' or 'Defl:N') which determines whether the .so is
+          # mmap-able straight out of the APK.
+          unzip -v "$apk" | awk '/ lib\// {print}' || true
+
       - name: Cache AVD
         uses: actions/cache@v5
         id: avd-cache
