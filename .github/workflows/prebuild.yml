@@ -96,7 +96,7 @@ jobs:
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
-      - uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@fix/android-platform-24
+      - uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@main
         id: prebuild
         with:
           module_name: ${{ inputs.module_name }}
