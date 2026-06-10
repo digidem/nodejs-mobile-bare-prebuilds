@@ -8,6 +8,7 @@
 set -euo pipefail
 
 APK="${GITHUB_WORKSPACE}/.nodejs-mobile-bare-prebuilds/test-harness/android/app/build/outputs/apk/debug/app-debug.apk"
+APP_ID=com.digidem.nodejstest
 TIMEOUT_SECONDS=1200
 
 adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
@@ -16,20 +17,26 @@ adb logcat -c
 
 # Launch the activity. The app pumps node's stdout/stderr to logcat tag
 # NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done.
-adb shell am start -W -n com.digidem.nodejstest/.TestActivity
+adb shell am start -W -n "$APP_ID/.TestActivity"
 
 # Run logcat as a coprocess so we can kill it explicitly once the sentinel
 # is seen. (A plain `adb logcat | awk` pipeline hangs because adb only
 # notices the pipe has closed when it next tries to write, and no further
 # lines are coming once the app has exited.)
 coproc LOGCAT { adb logcat -v raw -s NODEJS-MOBILE:V; }
+# Snapshot the coproc's PID and read FD: bash UNSETS LOGCAT_PID and
+# LOGCAT[0] as soon as it reaps the terminated coprocess, so reading
+# them later can trip `set -u` (observed when the app exits quickly).
+logcat_pid="${LOGCAT_PID}"
+logcat_fd="${LOGCAT[0]}"
 
 EXIT_CODE=""
+APP_DIED=""
 SECONDS=0
 while (( SECONDS < TIMEOUT_SECONDS )); do
   # Per-read timeout keeps the outer timeout check live even when logcat
   # is silent (app crashed without emitting the sentinel, etc.).
-  if IFS= read -r -u "${LOGCAT[0]}" -t 10 line; then
+  if IFS= read -r -u "$logcat_fd" -t 10 line; then
     printf '%s\n' "$line"
     case "$line" in
       *__NODE_EXIT__:*)
@@ -37,11 +44,27 @@ while (( SECONDS < TIMEOUT_SECONDS )); do
         break
         ;;
     esac
+  elif [ -z "$(adb shell pidof -s "$APP_ID" 2>/dev/null | tr -d '[:space:]')" ]; then
+    # Logcat went quiet AND the app process is gone: it crashed without
+    # emitting the sentinel (e.g. a native SIGSEGV in an addon). Fail
+    # now instead of waiting out the full TIMEOUT_SECONDS.
+    APP_DIED=1
+    break
   fi
 done
 
-kill "${LOGCAT_PID}" 2>/dev/null || true
-wait "${LOGCAT_PID}" 2>/dev/null || true
+# Kill the adb logcat client itself, not just the coproc subshell — a
+# surviving client keeps an adb server connection open, which has hung
+# android-emulator-runner's emulator teardown until the job timeout.
+kill "$logcat_pid" 2>/dev/null || true
+pkill -f 'adb logcat' 2>/dev/null || true
+wait "$logcat_pid" 2>/dev/null || true
+
+if [ -n "$APP_DIED" ]; then
+  echo "::error::App process died without emitting __NODE_EXIT__ (native crash?). Recent crash log:"
+  adb logcat -d -t 100 -b crash 2>/dev/null || true
+  exit 1
+fi
 
 if [ -z "$EXIT_CODE" ]; then
   echo "::error::Did not observe __NODE_EXIT__ sentinel within ${TIMEOUT_SECONDS}s"

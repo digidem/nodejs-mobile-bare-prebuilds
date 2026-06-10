@@ -163,6 +163,17 @@ runs:
         esac
         case "${{ inputs.platform }}" in
           android)
+            # bare-make's Android toolchain (holepunchto/cmake-toolchains)
+            # defaults to ANDROID_PLATFORM=android-29. Recent NDKs emit RELR
+            # packed relocations by default when targeting API >= 28, and
+            # Android < 9 cannot load those: the older dynamic linker logs
+            # "unused DT entry" for the unknown DT_ANDROID_RELR tags
+            # (0x6fffe000/1/3), skips the relocations, and the library
+            # SIGSEGVs on first use. Pin the target API to nodejs-mobile's
+            # support floor (Android 7.0, API 24) so relative relocations
+            # stay in plain .rela.dyn, loadable on every supported device.
+            extra_args+=(-D ANDROID_PLATFORM=android-24)
+
             # bare-make's Android toolchain leaves ANDROID_STL=none, so the
             # NDK's clang adds -nostdinc++ and no C++ stdlib headers are in
             # scope. Modules that include any C++ stdlib header (e.g.

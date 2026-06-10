@@ -62,6 +62,17 @@ on:
         description: "Android API level for the emulator"
         required: false
         default: 30
+      floor_api_level:
+        type: number
+        description: |
+          Oldest Android API level the prebuild must load on. Runs the same
+          test on a second, older emulator. Guards against toolchain output
+          that newer devices accept but older linkers can't load — e.g. RELR
+          packed relocations (emitted when ANDROID_PLATFORM >= 28) SIGSEGV
+          on Android < 9. Default matches the ANDROID_PLATFORM the prebuild
+          action targets. Set equal to `api_level` to skip the second run.
+        required: false
+        default: 24
       harness_ref:
         type: string
         description: "Ref of digidem/nodejs-mobile-bare-prebuilds to pull the harness from"
@@ -89,11 +100,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # Test on both the requested API level and the floor API level
+        # (deduped when they're equal).
+        api-level: ${{ fromJSON(inputs.api_level == inputs.floor_api_level && format('[{0}]', inputs.api_level) || format('[{0},{1}]', inputs.floor_api_level, inputs.api_level)) }}
+    name: test (API ${{ matrix.api-level }})
     steps:
-      - name: Map target to emulator arch
+      - name: Map target to emulator arch and image
         id: inputs
         env:
           TARGET: ${{ inputs.target }}
+          API_LEVEL: ${{ matrix.api-level }}
         shell: bash
         run: |
           set -eu
@@ -105,6 +124,12 @@ jobs:
               exit 1
               ;;
           esac
+          # ATD (automated test device) system images only exist for API 30+.
+          if [ "$API_LEVEL" -ge 30 ]; then
+            echo "emulator_target=google_atd" >> "$GITHUB_OUTPUT"
+          else
+            echo "emulator_target=default" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Checkout caller repo
         uses: actions/checkout@v6
@@ -187,14 +212,14 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-api${{ inputs.api_level }}-${{ steps.inputs.outputs.emulator_arch }}-v1
+          key: avd-api${{ matrix.api-level }}-${{ steps.inputs.outputs.emulator_arch }}-v1
 
       - name: Generate AVD snapshot
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
         with:
-          api-level: ${{ inputs.api_level }}
-          target: google_atd
+          api-level: ${{ matrix.api-level }}
+          target: ${{ steps.inputs.outputs.emulator_target }}
           arch: ${{ steps.inputs.outputs.emulator_arch }}
           force-avd-creation: false
           ram-size: 4096M
@@ -205,8 +230,8 @@ jobs:
       - name: Run test on emulator
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
         with:
-          api-level: ${{ inputs.api_level }}
-          target: google_atd
+          api-level: ${{ matrix.api-level }}
+          target: ${{ steps.inputs.outputs.emulator_target }}
           arch: ${{ steps.inputs.outputs.emulator_arch }}
           force-avd-creation: false
           ram-size: 4096M
