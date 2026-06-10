@@ -1,0 +1,38 @@
+name: CI (pipeline self-test)
+
+# Runs the real prebuild -> emulator-test pipeline on every PR that touches
+# the workflows, the composite actions, or the test harness. Because the
+# reusable workflows check out the action and harness at their own
+# `job.workflow_sha`, the PR's in-flight changes are what actually run —
+# no need for temporary action-ref pins or manual `test.yml` dispatches.
+#
+# Android-only on purpose: it's the cheap leg (~15 min on ubuntu runners,
+# including the floor-API emulator) and where toolchain regressions like
+# the RELR Android < 9 crash live. Run `test.yml` manually for an iOS leg.
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "test-harness/**"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    uses: ./.github/workflows/prebuild.yml
+    with:
+      # Small, fast module that still exercises the C++ stdlib include
+      # injection path in the prebuild action.
+      module_name: quickbit-native
+      platform: android
+      arch: x64
+      module_version: latest
+
+  test-android:
+    needs: build-android
+    uses: ./.github/workflows/test-android.yml
+    with:
+      module_spec: ${{ needs.build-android.outputs.module_spec }}

@@ -75,9 +75,13 @@ on:
         default: 24
       harness_ref:
         type: string
-        description: "Ref of digidem/nodejs-mobile-bare-prebuilds to pull the harness from"
+        description: |
+          Optional override for the harness checkout ref. Defaults to the
+          ref this reusable workflow itself is running from
+          (`job.workflow_sha`), so the harness always matches the workflow
+          version.
         required: false
-        default: "main"
+        default: ""
       git_repo_slug:
         type: string
         description: |
@@ -137,8 +141,8 @@ jobs:
       - name: Checkout test harness
         uses: actions/checkout@v6
         with:
-          repository: digidem/nodejs-mobile-bare-prebuilds
-          ref: ${{ inputs.harness_ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ inputs.harness_ref || job.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
 
       - uses: actions/setup-node@v6
