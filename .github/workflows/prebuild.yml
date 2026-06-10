@@ -107,6 +107,7 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
+          persist-credentials: false
 
       - uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/prebuild
         id: prebuild

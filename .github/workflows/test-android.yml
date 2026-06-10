@@ -144,6 +144,7 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ inputs.harness_ref || job.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
+          persist-credentials: false
 
       - uses: actions/setup-node@v6
         with:

@@ -16,6 +16,9 @@ on:
       - ".github/**"
       - "test-harness/**"
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -25,11 +28,12 @@ jobs:
     uses: ./.github/workflows/prebuild.yml
     with:
       # Small, fast module that still exercises the C++ stdlib include
-      # injection path in the prebuild action.
+      # injection path in the prebuild action. Pinned so a breaking
+      # upstream release can't fail CI for unrelated PRs.
       module_name: quickbit-native
       platform: android
       arch: x64
-      module_version: latest
+      module_version: "2.4.8"
 
   test-android:
     needs: build-android
