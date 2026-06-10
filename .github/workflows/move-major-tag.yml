@@ -1,0 +1,36 @@
+name: Move major version tag
+
+# Keeps the floating major tag callers pin (`uses: ...@v2`) pointed at the
+# latest release of that major. Pushing a semver tag (directly or via
+# `gh release create`) force-moves the corresponding major tag — callers
+# pick the new version up on their next run, with workflow, composite
+# action, and test harness guaranteed in sync (the reusable workflows
+# check themselves out at `job.workflow_sha`).
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  move-major-tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Force-move major tag
+        run: |
+          set -eu
+          major="${GITHUB_REF_NAME%%.*}"
+          # Peel through annotated tag objects to the commit — GITHUB_SHA
+          # is the tag object for annotated tags, not the commit.
+          commit=$(git rev-parse "${GITHUB_REF_NAME}^{commit}")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag --force --annotate "$major" --message "Point ${major} at ${GITHUB_REF_NAME}" "$commit"
+          git push origin "refs/tags/${major}" --force
+          echo "Moved ${major} -> ${GITHUB_REF_NAME} (${commit})"

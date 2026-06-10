@@ -14,6 +14,7 @@ by the Holepunch team. These modules are built using
 - [Testing prebuilds on an emulator / simulator](#testing-prebuilds-on-an-emulator--simulator)
   - [Running the module's own test suite](#running-the-modules-own-test-suite)
 - [Patching the module before build](#patching-the-module-before-build)
+- [Versioning and releasing](#versioning-and-releasing)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -227,6 +228,48 @@ unpack and before `npm install`.
 
 To use a different directory name, pass `patches_dir:` to
 `prebuild-all.yml` / `prebuild.yml`.
+
+## Versioning and releasing
+
+Callers pin the reusable workflows to a **floating major tag**:
+
+```yaml
+uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v2
+```
+
+Internally, nothing else is pinned: each reusable workflow checks this repo
+out at its own ref (`job.workflow_sha`) and runs the composite action and
+test harness from that checkout. Workflow, action, and harness therefore
+always run at the same commit — whatever `v2` (or a branch, for dispatches)
+resolves to. Never reference the composite action with an `@<ref>` from
+inside this repo; use the local path from the harness checkout.
+
+### Cutting a release
+
+1. Merge to `main`. PRs touching `.github/**` or `test-harness/**` run the
+   real pipeline (`ci.yml`: prebuild → emulator test, including the
+   floor-API emulator), at the PR's own commit — in-flight changes are what
+   execute, so no manual validation dispatch is needed.
+2. Tag a semver release and push it:
+
+   ```sh
+   git tag v2.2.0 && git push origin v2.2.0
+   # or, with release notes:
+   gh release create v2.2.0 --generate-notes
+   ```
+
+3. The `move-major-tag.yml` workflow force-moves `v2` to the new tag
+   automatically. Callers on `@v2` pick the new version up on their next
+   run — no changes needed in the calling repos.
+
+**Breaking changes** (renamed/removed inputs, changed artifact layout, new
+required permissions) get a new major: tag `v3.0.0`, which creates/moves
+`v3`; existing `@v2` callers are untouched until they opt in by editing
+their `uses:` references.
+
+To test unreleased changes end-to-end, dispatch `test.yml` from your branch
+in the Actions tab — the whole pipeline (workflows, action, harness) runs at
+the branch's commit.
 
 ## Contributing
 

@@ -59,6 +59,9 @@ jobs:
     uses: ./.github/workflows/test-android.yml
     with:
       module_spec: ${{ needs.build-android.outputs.module_spec }}
+      # test_script is only consulted when test_runner is 'custom' —
+      # derive it so a provided script can't be silently ignored.
+      test_runner: ${{ inputs.test_script != '' && 'custom' || 'smoke' }}
       test_script: ${{ inputs.test_script }}
 
   build-ios:
@@ -78,4 +81,5 @@ jobs:
     uses: ./.github/workflows/test-ios.yml
     with:
       module_spec: ${{ needs.build-ios.outputs.module_spec }}
+      test_runner: ${{ inputs.test_script != '' && 'custom' || 'smoke' }}
       test_script: ${{ inputs.test_script }}
