@@ -15,15 +15,21 @@ adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do slee
 adb install -r -g "$APK"
 adb logcat -c
 
-# Launch the activity. The app pumps node's stdout/stderr to logcat tag
-# NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done.
-adb shell am start -W -n "$APP_ID/.TestActivity"
-
 # Run logcat as a coprocess so we can kill it explicitly once the sentinel
 # is seen. (A plain `adb logcat | awk` pipeline hangs because adb only
 # notices the pipe has closed when it next tries to write, and no further
-# lines are coming once the app has exited.)
+# lines are coming once the app has exited.) Started BEFORE the launch so
+# no early NODEJS-MOBILE output is missed.
 coproc LOGCAT { adb logcat -v raw -s NODEJS-MOBILE:V; }
+
+# Launch the activity. The app pumps node's stdout/stderr to logcat tag
+# NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done. Fire-and-forget,
+# `timeout`-bounded: `am start -W` blocks until the launch completes, which
+# hangs forever on a wedged emulator (seen on flaky API 24 images) — and
+# that hang is BEFORE the watch loop, so neither the loop's per-read
+# timeout nor its SECONDS budget can bound it. Drop -W and cap the dispatch
+# so a stuck launch falls through to the loop, which fails on the timeout.
+timeout 60 adb shell am start -n "$APP_ID/.TestActivity" || true
 # Snapshot the coproc's PID and read FD: bash UNSETS LOGCAT_PID and
 # LOGCAT[0] as soon as it reaps the terminated coprocess, so reading
 # them later can trip `set -u` (observed when the app exits quickly).
@@ -44,12 +50,23 @@ while (( SECONDS < TIMEOUT_SECONDS )); do
         break
         ;;
     esac
-  elif [ -z "$(adb shell pidof -s "$APP_ID" 2>/dev/null | tr -d '[:space:]')" ]; then
-    # Logcat went quiet AND the app process is gone: it crashed without
-    # emitting the sentinel (e.g. a native SIGSEGV in an addon). Fail
-    # now instead of waiting out the full TIMEOUT_SECONDS.
-    APP_DIED=1
-    break
+  else
+    # Logcat went quiet. Distinguish "app crashed" from "emulator wedged".
+    # `timeout` bounds the adb call so a hung emulator can't freeze this
+    # loop — without it the SECONDS budget (only re-checked at the loop
+    # top) never fires and the job stalls to its 45-min wall clock.
+    # `timeout` exits 124 specifically when it kills a hung adb; any other
+    # exit means adb answered (pidof itself exits non-zero when the
+    # process is absent, so we key off timeout's code, not adb's). The
+    # `|| rc=$?` form keeps `set -e` from exiting on that non-zero.
+    pid=$(timeout 15 adb shell pidof -s "$APP_ID" 2>/dev/null) && rc=0 || rc=$?
+    pid=${pid//[$' \t\r\n']/}
+    if [ "$rc" -ne 124 ] && [ -z "$pid" ]; then
+      # App process is gone without emitting the sentinel (e.g. a native
+      # SIGSEGV in an addon). Fail now instead of waiting out the timeout.
+      APP_DIED=1
+      break
+    fi
   fi
 done
 

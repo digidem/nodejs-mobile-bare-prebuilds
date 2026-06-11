@@ -96,7 +96,20 @@ jobs:
       # resolves against the workspace root.
       - uses: actions/checkout@v6
 
-      - uses: digidem/nodejs-mobile-bare-prebuilds/.github/actions/prebuild@main
+      # Check out this repo at the SAME ref this reusable workflow is
+      # running from (`job.workflow_sha` resolves the caller's @v2/@main/
+      # branch ref), so the composite action below always matches the
+      # workflow version — no @main pin that can drift from tagged
+      # callers, and branch dispatches test in-flight action changes.
+      - name: Checkout prebuild harness
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .nodejs-mobile-bare-prebuilds
+          persist-credentials: false
+
+      - uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/prebuild
         id: prebuild
         with:
           module_name: ${{ inputs.module_name }}
