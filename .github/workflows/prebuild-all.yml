@@ -140,8 +140,12 @@ jobs:
     name: ${{ inputs.module_name }} (${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.simulator && '-simulator' || '' }})
     steps:
       # Caller's repo — needed so `patches_dir` (a caller-relative path)
-      # resolves against the workspace root.
+      # resolves against the workspace root. `persist-credentials: false`
+      # keeps the caller's GITHUB_TOKEN off disk — see the comment in
+      # prebuild.yml.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # Same-ref harness checkout — see the comment in prebuild.yml.
       - name: Checkout prebuild harness
