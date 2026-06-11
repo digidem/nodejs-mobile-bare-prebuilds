@@ -44,12 +44,23 @@ while (( SECONDS < TIMEOUT_SECONDS )); do
         break
         ;;
     esac
-  elif [ -z "$(adb shell pidof -s "$APP_ID" 2>/dev/null | tr -d '[:space:]')" ]; then
-    # Logcat went quiet AND the app process is gone: it crashed without
-    # emitting the sentinel (e.g. a native SIGSEGV in an addon). Fail
-    # now instead of waiting out the full TIMEOUT_SECONDS.
-    APP_DIED=1
-    break
+  else
+    # Logcat went quiet. Distinguish "app crashed" from "emulator wedged".
+    # `timeout` bounds the adb call so a hung emulator can't freeze this
+    # loop — without it the SECONDS budget (only re-checked at the loop
+    # top) never fires and the job stalls to its 45-min wall clock.
+    # `timeout` exits 124 specifically when it kills a hung adb; any other
+    # exit means adb answered (pidof itself exits non-zero when the
+    # process is absent, so we key off timeout's code, not adb's). The
+    # `|| rc=$?` form keeps `set -e` from exiting on that non-zero.
+    pid=$(timeout 15 adb shell pidof -s "$APP_ID" 2>/dev/null) && rc=0 || rc=$?
+    pid=${pid//[$' \t\r\n']/}
+    if [ "$rc" -ne 124 ] && [ -z "$pid" ]; then
+      # App process is gone without emitting the sentinel (e.g. a native
+      # SIGSEGV in an addon). Fail now instead of waiting out the timeout.
+      APP_DIED=1
+      break
+    fi
   fi
 done
 
