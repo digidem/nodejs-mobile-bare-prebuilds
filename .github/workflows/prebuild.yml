@@ -93,8 +93,13 @@ jobs:
       module_version: ${{ steps.prebuild.outputs.module_version }}
     steps:
       # Caller's repo — needed so `patches_dir` (a caller-relative path)
-      # resolves against the workspace root.
+      # resolves against the workspace root. `persist-credentials: false`
+      # keeps the caller's GITHUB_TOKEN out of $GITHUB_WORKSPACE/.git/config
+      # so the untrusted `npm install` of the target module (with lifecycle
+      # scripts) below can't read a (release-write-capable) token off disk.
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       # Check out this repo at the SAME ref this reusable workflow is
       # running from (`job.workflow_sha` resolves the caller's @v2/@main/

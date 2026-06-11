@@ -144,7 +144,12 @@ runs:
     - name: Install deps for package
       shell: bash
       working-directory: ./package
-      run: npm install
+      # `--ignore-scripts`: the target module is untrusted third-party
+      # code. bare-make drives the native build from CMakeLists afterwards,
+      # so no install-time lifecycle script is needed (same as the
+      # better-sqlite3 workflow). Defence-in-depth alongside the caller
+      # checkout's `persist-credentials: false`.
+      run: npm install --ignore-scripts
 
     - name: Install patched cmake-napi
       shell: bash
