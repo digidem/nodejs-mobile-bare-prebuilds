@@ -143,13 +143,13 @@ jobs:
       # resolves against the workspace root. `persist-credentials: false`
       # keeps the caller's GITHUB_TOKEN off disk — see the comment in
       # prebuild.yml.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       # Same-ref harness checkout — see the comment in prebuild.yml.
       - name: Checkout prebuild harness
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}

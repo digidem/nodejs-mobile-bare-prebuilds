@@ -97,7 +97,7 @@ jobs:
       # keeps the caller's GITHUB_TOKEN out of $GITHUB_WORKSPACE/.git/config
       # so the untrusted `npm install` of the target module (with lifecycle
       # scripts) below can't read a (release-write-capable) token off disk.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -107,7 +107,7 @@ jobs:
       # workflow version — no @main pin that can drift from tagged
       # callers, and branch dispatches test in-flight action changes.
       - name: Checkout prebuild harness
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
