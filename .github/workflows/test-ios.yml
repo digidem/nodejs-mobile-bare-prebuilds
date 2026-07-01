@@ -115,7 +115,7 @@ jobs:
 
       - name: Cache NodeMobile xcframework
         id: cache-nodemobile
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .nodejs-mobile-bare-prebuilds/test-harness/ios/NodeMobile
           key: nodemobile-${{ inputs.nodejs_mobile_version }}
