@@ -165,7 +165,7 @@ jobs:
 
       - name: Cache nodejs-mobile android binaries
         id: cache-libnode
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: .nodejs-mobile-bare-prebuilds/test-harness/android/app/libnode
           key: libnode-android-${{ inputs.nodejs_mobile_version }}
@@ -211,7 +211,7 @@ jobs:
         run: gradle -PabiFilter=${ABI} :app:assembleDebug --no-daemon
 
       - name: Cache AVD
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         id: avd-cache
         with:
           path: |
