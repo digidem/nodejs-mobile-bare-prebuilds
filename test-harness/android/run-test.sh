@@ -20,7 +20,20 @@ adb logcat -c
 # notices the pipe has closed when it next tries to write, and no further
 # lines are coming once the app has exited.) Started BEFORE the launch so
 # no early NODEJS-MOBILE output is missed.
-coproc LOGCAT { adb logcat -v raw -s NODEJS-MOBILE:V; }
+#
+# Tags beyond NODEJS-MOBILE (node's stdout/stderr, pumped by native-lib.cpp)
+# carry failures that are otherwise invisible here, which makes a broken run
+# look like silence:
+#   nodejs        node's own fatal-error reports, logged by nodejs-mobile's
+#                 libnode rather than through our stdout/stderr pipe — this is
+#                 where an uncaught exception's message actually lands.
+#   System.err    Java stack traces. TestActivity's asset copy catches and
+#                 prints per-file failures, so a file missing on device (and a
+#                 resulting "cannot find addon") is only explained here.
+#   AndroidRuntime  uncaught Java exceptions killing the app before node starts.
+# `-v raw` is kept so TAP output stays clean and the sentinel parsing below is
+# unchanged; extra tags interleave without a prefix.
+coproc LOGCAT { adb logcat -v raw -s NODEJS-MOBILE:V nodejs:V System.err:W AndroidRuntime:E; }
 
 # Launch the activity. The app pumps node's stdout/stderr to logcat tag
 # NODEJS-MOBILE and emits __NODE_EXIT__:<code> when done. Fire-and-forget,
