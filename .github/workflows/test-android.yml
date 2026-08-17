@@ -66,11 +66,18 @@ on:
         type: number
         description: |
           Oldest Android API level the prebuild must load on. Runs the same
-          test on a second, older emulator. Guards against toolchain output
-          that newer devices accept but older linkers can't load — e.g. RELR
-          packed relocations (emitted when ANDROID_PLATFORM >= 28) SIGSEGV
-          on Android < 9. Default matches the ANDROID_PLATFORM the prebuild
-          action targets. Set equal to `api_level` to skip the second run.
+          test on a second, older emulator. Default matches the
+          ANDROID_PLATFORM the prebuild action targets, which is nodejs-mobile's
+          real device-support floor. Set equal to `api_level` to skip the
+          second run.
+
+          This is the lower *bound*, not a sample: the point is that whatever
+          breaks only on the oldest supported device gets caught. RELR packed
+          relocations (emitted when ANDROID_PLATFORM >= 28, SIGSEGV on
+          Android < 9) are the one such break found so far and would also be
+          caught at 27 — but that is hindsight about one bug, not a reason to
+          raise the floor. Don't raise it because the emulator at this level is
+          awkward; fix the emulator.
         required: false
         default: 24
       harness_ref:
