@@ -128,11 +128,16 @@ jobs:
               exit 1
               ;;
           esac
-          # ATD (automated test device) system images only exist for API 30+.
+          # ATD (automated test device) images are built for exactly this — headless,
+          # fast, reliable — but only exist for API 30+. Below that, `google_apis`
+          # rather than `default`: the `default` API 24 image hung during cold boot
+          # on roughly two runs in three (adb polls `sys.boot_completed` a few times,
+          # then silence until the job timeout), and `google_apis` is the more
+          # maintained family for these old levels.
           if [ "$API_LEVEL" -ge 30 ]; then
             echo "emulator_target=google_atd" >> "$GITHUB_OUTPUT"
           else
-            echo "emulator_target=default" >> "$GITHUB_OUTPUT"
+            echo "emulator_target=google_apis" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout caller repo
