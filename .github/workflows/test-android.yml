@@ -103,7 +103,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # A healthy run is ~3-4 minutes end to end (SDK setup, gradle build,
+    # emulator boot, test). 15 gives generous headroom while making a wedged
+    # emulator fail in minutes rather than three quarters of an hour.
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -136,8 +139,12 @@ jobs:
           # maintained family for these old levels.
           if [ "$API_LEVEL" -ge 30 ]; then
             echo "emulator_target=google_atd" >> "$GITHUB_OUTPUT"
+            echo "emulator_ram=4096M" >> "$GITHUB_OUTPUT"
           else
             echo "emulator_target=google_apis" >> "$GITHUB_OUTPUT"
+            # 4 GB on these old images is a plausible boot-hang contributor and
+            # they need nothing like it.
+            echo "emulator_ram=2048M" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Checkout caller repo
@@ -228,7 +235,12 @@ jobs:
           target: ${{ steps.inputs.outputs.emulator_target }}
           arch: ${{ steps.inputs.outputs.emulator_arch }}
           force-avd-creation: false
-          ram-size: 4096M
+          ram-size: ${{ steps.inputs.outputs.emulator_ram }}
+          # A healthy boot reports `sys.boot_completed` within ~10s. Failing at
+          # 5 minutes turns a wedged emulator into a clear step failure instead
+          # of a job that sits there until the timeout cancels it — and lets the
+          # post steps run.
+          emulator-boot-timeout: 300
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
           # android-emulator-runner runs each LINE of `script:` as a separate
