@@ -210,28 +210,12 @@ jobs:
           ABI: ${{ steps.inputs.outputs.emulator_arch }}
         run: gradle -PabiFilter=${ABI} :app:assembleDebug --no-daemon
 
-      - name: Cache AVD
-        uses: actions/cache@v5
-        id: avd-cache
-        with:
-          path: |
-            ~/.android/avd/*
-            ~/.android/adb*
-          key: avd-api${{ matrix.api-level }}-${{ steps.inputs.outputs.emulator_arch }}-v1
-
-      - name: Generate AVD snapshot
-        if: steps.avd-cache.outputs.cache-hit != 'true'
-        uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
-        with:
-          api-level: ${{ matrix.api-level }}
-          target: ${{ steps.inputs.outputs.emulator_target }}
-          arch: ${{ steps.inputs.outputs.emulator_arch }}
-          force-avd-creation: false
-          ram-size: 4096M
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          disable-animations: false
-          script: echo "AVD cached"
-
+      # No AVD cache and no snapshot: emulator snapshots are not reliable on
+      # GitHub-hosted runners. The API 24 image saved `default_boot` in 1.5s,
+      # reloaded it in 0.8s, then never reported `sys.boot_completed` again —
+      # 42 minutes of silence until the job timeout. API 30 failed the run
+      # after restoring a cached snapshot too. Cold boot costs ~10s and always
+      # works, and the cache existed only to carry the snapshot.
       - name: Run test on emulator
         uses: reactivecircus/android-emulator-runner@e89f39f1abbbd05b1113a29cf4db69e7540cae5a # v2.37.0
         with:
@@ -240,7 +224,7 @@ jobs:
           arch: ${{ steps.inputs.outputs.emulator_arch }}
           force-avd-creation: false
           ram-size: 4096M
-          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
           # android-emulator-runner runs each LINE of `script:` as a separate
           # `sh -c` invocation, so variable state and `set` flags don't
