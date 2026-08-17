@@ -178,7 +178,7 @@ jobs:
           set -euo pipefail
           harness=.nodejs-mobile-bare-prebuilds/test-harness/android
           tmp=$(mktemp -d)
-          url="https://github.com/nodejs-mobile/nodejs-mobile/releases/download/${NM_VERSION}/nodejs-mobile-${NM_VERSION}-android.zip"
+          url="$(.nodejs-mobile-bare-prebuilds/scripts/nodejs-mobile-url.sh "$NM_VERSION" android)"
           echo "Downloading $url"
           curl -fL "$url" -o "$tmp/libnode.zip"
           unzip -q "$tmp/libnode.zip" -d "$tmp/libnode"
