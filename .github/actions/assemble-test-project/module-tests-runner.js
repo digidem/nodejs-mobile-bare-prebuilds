@@ -84,8 +84,62 @@ async function main() {
   }
 }
 
+// `err.stack` omits `cause`, so print the chain.
+function formatError(err) {
+  const parts = []
+  let e = err
+  for (let depth = 0; e && depth < 5; depth++) {
+    parts.push((depth === 0 ? '' : 'caused by: ') + String(e.stack || e))
+    e = e.cause
+  }
+  return parts.join('\n')
+}
+
+// require-addon raises "Cannot find addon" when every candidate fails to
+// *load* — not only when none exist. A prebuild that is present but can't
+// dlopen (built without linking libnode.so so napi_* never resolves, wrong
+// ABI, …) therefore reports exactly like a missing file. Its `cause` doesn't
+// settle it either: the resolver overwrites `cause` per candidate, so it ends
+// up holding the last candidate's error, normally a "Cannot find module" for a
+// path that never existed.
+//
+// The candidate list is on the error, so retry the ones actually on disk and
+// report why each failed. That separates "prebuild wasn't installed for this
+// target" from "prebuild is installed but broken".
+function addonDiagnostics(err) {
+  if (!err || err.code !== 'ADDON_NOT_FOUND') return []
+  if (!Array.isArray(err.candidates)) return []
+
+  const { fileURLToPath } = require('url')
+  const lines = []
+
+  for (const candidate of err.candidates) {
+    let file
+    try {
+      file = fileURLToPath(candidate)
+    } catch {
+      continue // non-file: candidate (e.g. `linked:`)
+    }
+    if (!fs.existsSync(file)) continue
+    try {
+      process.dlopen({ exports: {} }, file)
+      lines.push('  ' + file + ': loaded on retry (original failure was elsewhere)')
+    } catch (e) {
+      lines.push('  ' + file + ': ' + (e && e.message ? e.message : e))
+    }
+  }
+
+  if (lines.length === 0) {
+    return [
+      'Addon diagnostics: no candidate exists on disk — no prebuild was installed for this target.'
+    ]
+  }
+  return ['Addon diagnostics: candidate(s) present but failed to load:'].concat(lines)
+}
+
 main().catch((err) => {
   console.error('Fatal error loading tests from ' + moduleName + ':')
-  console.error(err && err.stack ? err.stack : err)
+  console.error(formatError(err))
+  for (const line of addonDiagnostics(err)) console.error(line)
   process.exit(1)
 })
