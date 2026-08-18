@@ -110,10 +110,14 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # A healthy run is ~3-4 minutes end to end (SDK setup, gradle build,
-    # emulator boot, test). 15 gives generous headroom while making a wedged
-    # emulator fail in minutes rather than three quarters of an hour.
-    timeout-minutes: 15
+    # Must stay above `run-test.sh`'s own TIMEOUT_SECONDS (1200s) plus the
+    # ~4 min of setup/build/boot before it, or the job is cancelled while the
+    # script still believes it has time — taking its diagnosis path (the
+    # `__NODE_EXIT__` sentinel error, the `adb logcat -b crash` dump, the
+    # APP_DIED branch) with it, which is exactly what you need when a run
+    # hangs. A healthy run is ~4 minutes; the emulator itself fails fast via
+    # `emulator-boot-timeout` below, so this only has to bound the test step.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -131,24 +135,33 @@ jobs:
         run: |
           set -eu
           case "$TARGET" in
-            android-x64)   echo "emulator_arch=x86_64"    >> "$GITHUB_OUTPUT" ;;
-            android-arm64) echo "emulator_arch=arm64-v8a" >> "$GITHUB_OUTPUT" ;;
+            android-x64)   arch=x86_64 ;;
+            android-arm64) arch=arm64-v8a ;;
             *)
               echo "::error::Unsupported target '$TARGET' for Android tests (must be android-x64 or android-arm64)."
               exit 1
               ;;
           esac
+          echo "emulator_arch=${arch}" >> "$GITHUB_OUTPUT"
           # ATD (automated test device) images are built for exactly this — headless,
           # fast, reliable — but only exist for API 30+. Below that, `google_apis`
           # rather than `default`: the `default` API 24 image hung during cold boot
           # on roughly two runs in three (adb polls `sys.boot_completed` a few times,
           # then silence until the job timeout), and `google_apis` is the more
           # maintained family for these old levels.
+          #
+          # One hole to route around: google_apis at API 27 ships arm64-v8a and
+          # x86 only — no x86_64, uniquely in 24-29 — so that combination falls
+          # back to `default`.
           if [ "$API_LEVEL" -ge 30 ]; then
             echo "emulator_target=google_atd" >> "$GITHUB_OUTPUT"
             echo "emulator_ram=4096M" >> "$GITHUB_OUTPUT"
           else
-            echo "emulator_target=google_apis" >> "$GITHUB_OUTPUT"
+            if [ "$API_LEVEL" -eq 27 ] && [ "$arch" = "x86_64" ]; then
+              echo "emulator_target=default" >> "$GITHUB_OUTPUT"
+            else
+              echo "emulator_target=google_apis" >> "$GITHUB_OUTPUT"
+            fi
             # 4 GB on these old images is a plausible boot-hang contributor and
             # they need nothing like it.
             echo "emulator_ram=2048M" >> "$GITHUB_OUTPUT"
