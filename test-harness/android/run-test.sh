@@ -67,7 +67,7 @@ while (( SECONDS < TIMEOUT_SECONDS )); do
     # Logcat went quiet. Distinguish "app crashed" from "emulator wedged".
     # `timeout` bounds the adb call so a hung emulator can't freeze this
     # loop — without it the SECONDS budget (only re-checked at the loop
-    # top) never fires and the job stalls to its 45-min wall clock.
+    # top) never fires and the job stalls to its wall clock.
     # `timeout` exits 124 specifically when it kills a hung adb; any other
     # exit means adb answered (pidof itself exits non-zero when the
     # process is absent, so we key off timeout's code, not adb's). The
