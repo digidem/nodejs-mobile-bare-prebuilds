@@ -205,6 +205,15 @@ runs:
             extra_args+=(-D "CMAKE_C_STANDARD_INCLUDE_DIRECTORIES=$LIBCXX_INCLUDE")
             ;;
         esac
+        case "${{ inputs.platform }}" in
+          ios|macos)
+            # Prefer Apple clang: Homebrew LLVM's libc++ drops availability
+            # annotations, so addons can import symbols newer than the deployment
+            # target (e.g. std::__hash_memory, LLVM 21) and SIGSEGV on older iOS.
+            # Apple clang gates those symbols to the deployment target.
+            extra_args+=(-D APPLE_CLANG=ON)
+            ;;
+        esac
         if [ "${{ inputs.simulator }}" = "true" ]; then
           extra_args+=(--simulator)
         fi
