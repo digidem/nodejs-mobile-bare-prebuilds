@@ -49,11 +49,23 @@ static int start_redirecting_stdout_stderr() {
     if (pipe(pipe_stderr) != 0) return -1;
     dup2(pipe_stderr[1], STDERR_FILENO);
 
+    // Left joinable so drain_stdio_pumps() can wait for them.
     if (pthread_create(&thread_stdout, 0, thread_stdout_func, 0) != 0) return -1;
-    pthread_detach(thread_stdout);
     if (pthread_create(&thread_stderr, 0, thread_stderr_func, 0) != 0) return -1;
-    pthread_detach(thread_stderr);
     return 0;
+}
+
+// Without this, System.exit() on the Java side races the pumps and the final
+// stderr — usually the uncaught-exception traceback — never reaches logcat.
+static void drain_stdio_pumps() {
+    // dup2() left two descriptors on each pipe's write end; read() only EOFs
+    // once both are closed.
+    close(STDOUT_FILENO);
+    close(pipe_stdout[1]);
+    close(STDERR_FILENO);
+    close(pipe_stderr[1]);
+    pthread_join(thread_stdout, NULL);
+    pthread_join(thread_stderr, NULL);
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -89,6 +101,7 @@ Java_com_digidem_nodejstest_TestActivity_startNodeWithArguments(
 
     int rc = node::Start(argc, argv);
     free(args_buffer);
+    drain_stdio_pumps();
     return (jint)rc;
 }
 
