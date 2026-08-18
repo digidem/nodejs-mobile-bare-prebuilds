@@ -2,7 +2,7 @@ name: Build prebuilds for all Holepunch-module targets
 
 # Reusable workflow that runs prebuild across the standard target set for
 # Holepunch-style bare-native modules (three Android ABIs + iOS device +
-# two iOS simulator slices). Resolves the requested version against npm
+# the arm64 iOS simulator). Resolves the requested version against npm
 # once up front (so every matrix entry builds the exact same version,
 # and a bogus spec fails fast without spinning up runners), then calls
 # the `prebuild` composite action per matrix entry.
@@ -32,6 +32,11 @@ on:
           run if siblings exist for the same module at other versions.
         required: false
         default: "patches"
+      nodejs_mobile_version:
+        type: string
+        description: "digidem/nodejs-mobile release to link against, without the leading v"
+        required: false
+        default: "24.19.0-0"
     outputs:
       module_version:
         description: "The exact version resolved and used for all builds"
@@ -132,9 +137,6 @@ jobs:
           - platform: ios
             arch: arm64
             simulator: true
-          - platform: ios
-            arch: x64
-            simulator: true
     runs-on: ${{ matrix.platform == 'ios' && 'macos-latest' || 'ubuntu-22.04' }}
     timeout-minutes: 20
     name: ${{ inputs.module_name }} (${{ matrix.platform }}-${{ matrix.arch }}${{ matrix.simulator && '-simulator' || '' }})
@@ -164,3 +166,4 @@ jobs:
           simulator: ${{ matrix.simulator || false }}
           module_version: ${{ needs.resolve.outputs.version }}
           patches_dir: ${{ inputs.patches_dir }}
+          nodejs_mobile_version: ${{ inputs.nodejs_mobile_version }}

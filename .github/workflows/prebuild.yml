@@ -42,6 +42,11 @@ on:
           module_version is applied before build.
         required: false
         default: "patches"
+      nodejs_mobile_version:
+        type: string
+        description: "digidem/nodejs-mobile release to link against, without the leading v"
+        required: false
+        default: "24.19.0-0"
   workflow_call:
     inputs:
       module_name:
@@ -76,6 +81,11 @@ on:
           module_version is applied before build.
         required: false
         default: "patches"
+      nodejs_mobile_version:
+        type: string
+        description: "digidem/nodejs-mobile release to link against, without the leading v"
+        required: false
+        default: "24.19.0-0"
     outputs:
       module_version:
         description: "The resolved version of the module"
@@ -123,3 +133,4 @@ jobs:
           simulator: ${{ inputs.simulator }}
           module_version: ${{ inputs.module_version }}
           patches_dir: ${{ inputs.patches_dir }}
+          nodejs_mobile_version: ${{ inputs.nodejs_mobile_version }}

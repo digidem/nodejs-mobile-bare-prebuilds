@@ -56,7 +56,7 @@ on:
         type: string
         description: "nodejs-mobile release tag to download NodeMobile.xcframework from"
         required: false
-        default: "v18.20.4"
+        default: "v24.19.0-0"
       simulator_name:
         type: string
         description: "Name of the iOS Simulator device to boot"

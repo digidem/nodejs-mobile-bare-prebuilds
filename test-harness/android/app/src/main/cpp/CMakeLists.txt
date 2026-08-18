@@ -6,8 +6,7 @@ include_directories(${CMAKE_SOURCE_DIR}/../../../libnode/include/node/)
 
 add_library(native-lib SHARED native-lib.cpp)
 
-# Node 24's v8config.h #errors below C++20; the NDK's clang defaults to
-# gnu++17. Harmless for the Node 18 headers.
+# Node 24's v8config.h requires C++20; NDK clang defaults to gnu++17.
 set_target_properties(native-lib PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON)

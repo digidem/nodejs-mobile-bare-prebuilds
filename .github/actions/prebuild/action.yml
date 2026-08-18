@@ -32,6 +32,10 @@ inputs:
       bump).
     required: false
     default: "patches"
+  nodejs_mobile_version:
+    description: "digidem/nodejs-mobile release to link against, without the leading v"
+    required: false
+    default: "24.19.0-0"
   node_version:
     description: "Node.js version to use"
     required: false
@@ -159,8 +163,15 @@ runs:
     - name: Generate
       shell: bash
       working-directory: ./package
+      env:
+        NODEJS_MOBILE_VERSION: ${{ inputs.nodejs_mobile_version }}
       run: |
         extra_args=()
+
+        # Pin the headers cmake-napi downloads; without this, builds silently
+        # track whatever NAPI_NODE_VERSION default the fork happens to carry.
+        extra_args+=(-D "NAPI_NODE_VERSION=${NODEJS_MOBILE_VERSION#v}")
+
         case "${{ inputs.platform }}" in
           android|linux)
             extra_args+=(-D CMAKE_SHARED_LINKER_FLAGS="-Wl,-z,max-page-size=16384")

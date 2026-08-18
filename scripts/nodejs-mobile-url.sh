@@ -1,14 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Prints the release-zip URL for a nodejs-mobile tag and platform.
+# Prints the release-zip URL for a digidem/nodejs-mobile tag and platform,
+# e.g. v24.19.0-0 -> nodejs-mobile-android-24.19.0-0.zip
 #
 # Usage: nodejs-mobile-url.sh <tag> <android|ios>
-#
-# Two release lines with different conventions:
-#   digidem/nodejs-mobile         v24.19.0-0  nodejs-mobile-android-24.19.0-0.zip
-#   nodejs-mobile/nodejs-mobile   v18.20.4    nodejs-mobile-v18.20.4-android.zip
-# The `-<rev>` mobile-revision suffix is what distinguishes them.
 
 tag="${1:?usage: nodejs-mobile-url.sh <tag> <android|ios>}"
 platform="${2:?usage: nodejs-mobile-url.sh <tag> <android|ios>}"
@@ -24,12 +20,11 @@ esac
 [[ "$tag" == v* ]] || tag="v$tag"
 version="${tag#v}"
 
-if [[ "$version" =~ -[0-9]+$ ]]; then
-  repo="digidem/nodejs-mobile"
-  asset="nodejs-mobile-${platform}-${version}.zip"
-else
-  repo="nodejs-mobile/nodejs-mobile"
-  asset="nodejs-mobile-${tag}-${platform}.zip"
+# The `-<rev>` mobile-revision suffix is what marks a digidem release.
+if [[ ! "$version" =~ -[0-9]+$ ]]; then
+  echo "nodejs-mobile-url.sh: '$tag' is not a digidem/nodejs-mobile tag (expected vX.Y.Z-R)." >&2
+  echo "nodejs-mobile v18-line releases are not supported by v3; pin these workflows @v2." >&2
+  exit 1
 fi
 
-echo "https://github.com/${repo}/releases/download/${tag}/${asset}"
+echo "https://github.com/digidem/nodejs-mobile/releases/download/${tag}/nodejs-mobile-${platform}-${version}.zip"
