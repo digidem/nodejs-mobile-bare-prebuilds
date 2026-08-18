@@ -34,7 +34,7 @@ excluded from npm tarballs.
 ## Usage
 
 The most common entry point is `prebuild-all.yml`, which builds the standard
-target set (three Android ABIs + iOS device + two iOS simulator slices),
+target set (three Android ABIs + iOS device + the arm64 iOS simulator),
 optionally runs the module's own test suite on an emulator/simulator, and
 publishes a GitHub Release with the artifacts.
 
@@ -52,14 +52,14 @@ on:
 
 jobs:
   build:
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v2
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v3
     with:
       module_name: sodium-native
       module_version: ${{ inputs.module_version }}
 
   test-android:
     needs: build
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-android.yml@v2
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-android.yml@v3
     with:
       module_spec: ${{ needs.build.outputs.module_spec }}
       test_runner: module
@@ -71,7 +71,7 @@ jobs:
 
   test-ios:
     needs: build
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-ios.yml@v2
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/test-ios.yml@v3
     with:
       module_spec: ${{ needs.build.outputs.module_spec }}
       test_runner: module
@@ -82,7 +82,7 @@ jobs:
     needs: [ build, test-android, test-ios ]
     permissions:
       contents: write
-    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/release.yml@v2
+    uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/release.yml@v3
     with:
       module_spec: ${{ needs.build.outputs.module_spec }}
 ```
@@ -96,6 +96,7 @@ jobs:
 | `module_name`    | yes      | —          | npm module to build                                                               |
 | `module_version` | no       | `latest`   | Exact version or dist-tag. Resolved against npm before the matrix runs.           |
 | `patches_dir`    | no       | `patches`  | Directory in the caller repo holding `<module>+<version>.patch` files (see below) |
+| `nodejs_mobile_version` | no | `24.19.0-0` | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) release to link against, without the leading `v` |
 
 **`test-android.yml` / `test-ios.yml`**
 
@@ -109,6 +110,7 @@ jobs:
 | `test_exclude`  | no       | —                                   | Newline-separated list of test file basenames to skip when `test_runner: module`.                                               |
 | `git_repo_slug` | no       | —                                   | `owner/repo` of the module's upstream GitHub repo. Pass `needs.build.outputs.git_repo_slug`. Required when `test_runner: module`. |
 | `git_ref`       | no       | —                                   | Commit SHA or tag to check out the upstream repo at. Pass `needs.build.outputs.git_ref`. Required when `test_runner: module`.   |
+| `nodejs_mobile_version` | no | `v24.19.0-0`                 | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) release tag the harness downloads libnode from.               |
 
 **`release.yml`**
 
@@ -234,15 +236,25 @@ To use a different directory name, pass `patches_dir:` to
 Callers pin the reusable workflows to a **floating major tag**:
 
 ```yaml
-uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v2
+uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v3
 ```
 
 Internally, nothing else is pinned: each reusable workflow checks this repo
 out at its own ref (`job.workflow_sha`) and runs the composite action and
 test harness from that checkout. Workflow, action, and harness therefore
-always run at the same commit — whatever `v2` (or a branch, for dispatches)
+always run at the same commit — whatever `v3` (or a branch, for dispatches)
 resolves to. Never reference the composite action with an `@<ref>` from
 inside this repo; use the local path from the harness checkout.
+
+### Which major tag to pin
+
+| Tag  | nodejs-mobile line                                        |
+| ---- | --------------------------------------------------------- |
+| `v3` | v24 only, from [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) (tags `vX.Y.Z-R`) |
+| `v2` | last line supporting upstream nodejs-mobile `v18.20.4`    |
+
+`v3` also drops the `ios-x64-simulator` target, which the v24 line doesn't
+ship.
 
 ### Cutting a release
 
@@ -253,18 +265,18 @@ inside this repo; use the local path from the harness checkout.
 2. Tag a semver release and push it:
 
    ```sh
-   git tag v2.2.0 && git push origin v2.2.0
+   git tag v3.1.0 && git push origin v3.1.0
    # or, with release notes:
-   gh release create v2.2.0 --generate-notes
+   gh release create v3.1.0 --generate-notes
    ```
 
-3. The `move-major-tag.yml` workflow force-moves `v2` to the new tag
-   automatically. Callers on `@v2` pick the new version up on their next
+3. The `move-major-tag.yml` workflow force-moves `v3` to the new tag
+   automatically. Callers on `@v3` pick the new version up on their next
    run — no changes needed in the calling repos.
 
 **Breaking changes** (renamed/removed inputs, changed artifact layout, new
-required permissions) get a new major: tag `v3.0.0`, which creates/moves
-`v3`; existing `@v2` callers are untouched until they opt in by editing
+required permissions) get a new major: tag `v4.0.0`, which creates/moves
+`v4`; existing `@v3` callers are untouched until they opt in by editing
 their `uses:` references.
 
 To test unreleased changes end-to-end, dispatch `test.yml` from your branch
