@@ -33,7 +33,7 @@ jobs:
       module_name: quickbit-native
       platform: android
       arch: x64
-      module_version: "2.4.8"
+      module_version: "2.4.9"
 
   test-android:
     needs: build-android
