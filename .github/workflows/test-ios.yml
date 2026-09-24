@@ -99,10 +99,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout caller repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Checkout test harness
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
           ref: ${{ inputs.harness_ref || job.workflow_sha }}
