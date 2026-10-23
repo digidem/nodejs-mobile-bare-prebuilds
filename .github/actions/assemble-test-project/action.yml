@@ -3,7 +3,7 @@ description: |
   Parses `module_spec` into name + version, downloads the prebuild artifact,
   installs the module under test into a `nodejs-project/` tree, drops the
   prebuilt `.node` files into `node_modules/<module>/prebuilds/<target>/`,
-  and places a `main.js` entry point.
+  and writes the `test.js` entry point that nodejs-mobile-test-harness runs.
 
   Three test-runner modes (selected by `test_runner`):
   - 'smoke'  (default): generated test that just `require()`s the module.
@@ -231,7 +231,7 @@ runs:
           npm install --ignore-scripts --no-audit --no-fund --no-save
         fi
 
-    - name: Place main.js, test.js, and harness-config.json
+    - name: Place test.js and harness-config.json
       shell: bash
       env:
         MODULE_NAME: ${{ steps.spec.outputs.module_name }}
@@ -242,10 +242,6 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        # main.js is always the wrapper: installs the exit-sentinel handler
-        # and delegates to ./test.js.
-        cp "$ACTION_PATH/wrapper.js" "$NODEDIR/main.js"
-
         # The 'smoke' and 'module' runners read their config (module name,
         # exclude list) from this JSON file at runtime — so the templates are
         # plain runnable JS with no placeholder substitution.

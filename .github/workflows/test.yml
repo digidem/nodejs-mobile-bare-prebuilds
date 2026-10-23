@@ -4,10 +4,10 @@ name: End-to-end test (manual dispatch)
 # whole pipeline can be exercised from the Actions tab without needing to call
 # these reusable workflows from another repo.
 #
-# Everything (workflows, composite action, test harness) runs at the commit
-# of this dispatch: the reusable workflows check out the action and harness
-# at their own `job.workflow_sha`, so in-flight changes on the triggering
-# branch are tested as-is.
+# The workflows and composite actions run at the commit of this dispatch: the
+# reusable workflows check out the actions at their own `job.workflow_sha`, so
+# in-flight changes on the triggering branch are tested as-is. The test
+# harness comes from npm, at the workflows' `harness_version`.
 
 on:
   workflow_dispatch:
