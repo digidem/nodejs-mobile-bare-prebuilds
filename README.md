@@ -111,7 +111,7 @@ jobs:
 | `git_repo_slug` | no       | —                                   | `owner/repo` of the module's upstream GitHub repo. Pass `needs.build.outputs.git_repo_slug`. Required when `test_runner: module`. |
 | `git_ref`       | no       | —                                   | Commit SHA or tag to check out the upstream repo at. Pass `needs.build.outputs.git_ref`. Required when `test_runner: module`.   |
 | `nodejs_mobile_version` | no | `v24.19.0-0`                 | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) release tag the test app runs on.                         |
-| `harness_version` | no | `1.0.0-pre.2`                        | Exact version of [nodejs-mobile-test-harness](https://www.npmjs.com/package/nodejs-mobile-test-harness) to build and run the test app with. |
+| `harness_version` | no | `1.0.0`                        | Exact version of [nodejs-mobile-test-harness](https://www.npmjs.com/package/nodejs-mobile-test-harness) to build and run the test app with. |
 
 **`release.yml`**
 

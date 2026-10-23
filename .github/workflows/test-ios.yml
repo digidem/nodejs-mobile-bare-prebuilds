@@ -68,7 +68,7 @@ on:
           Exact version of the nodejs-mobile-test-harness npm package that
           builds and runs the test app.
         required: false
-        default: "1.0.0-pre.2"
+        default: "1.0.0"
       git_repo_slug:
         type: string
         description: |
