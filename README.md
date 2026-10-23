@@ -110,7 +110,8 @@ jobs:
 | `test_exclude`  | no       | —                                   | Newline-separated list of test file basenames to skip when `test_runner: module`.                                               |
 | `git_repo_slug` | no       | —                                   | `owner/repo` of the module's upstream GitHub repo. Pass `needs.build.outputs.git_repo_slug`. Required when `test_runner: module`. |
 | `git_ref`       | no       | —                                   | Commit SHA or tag to check out the upstream repo at. Pass `needs.build.outputs.git_ref`. Required when `test_runner: module`.   |
-| `nodejs_mobile_version` | no | `v24.19.0-0`                 | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) release tag the harness downloads libnode from.               |
+| `nodejs_mobile_version` | no | `v24.19.0-0`                 | [digidem/nodejs-mobile](https://github.com/digidem/nodejs-mobile) release tag the test app runs on.                         |
+| `harness_version` | no | `1.0.0-pre.2`                        | Exact version of [nodejs-mobile-test-harness](https://www.npmjs.com/package/nodejs-mobile-test-harness) to build and run the test app with. |
 
 **`release.yml`**
 
@@ -140,9 +141,13 @@ builds, triggerable from the Actions tab for debugging. `test.yml` chains
 Two reusable workflows run the built `.node` file inside nodejs-mobile on a
 real emulator / simulator to catch runtime issues the prebuild step cannot
 (wrong page size, missing symbols, `require-addon` not finding the binary,
-etc.). The workflow bundles a `test.js` and the installed module into a
-minimal native app, installs it on an emulator / simulator, streams the app's
-stdout into the workflow log, and passes/fails on the Node exit code.
+etc.). The workflow writes a `test.js` next to the installed module and hands
+the directory to
+[nodejs-mobile-test-harness](https://github.com/digidem/nodejs-mobile-test-harness),
+which builds it into a minimal native app, runs it on the emulator /
+simulator, streams the app's stdout into the workflow log, and passes/fails on
+the Node exit code. Use that package directly to run your own tests on
+nodejs-mobile outside these workflows.
 
 Three `test_runner` modes, selected per test workflow:
 
@@ -239,12 +244,13 @@ Callers pin the reusable workflows to a **floating major tag**:
 uses: digidem/nodejs-mobile-bare-prebuilds/.github/workflows/prebuild-all.yml@v3
 ```
 
-Internally, nothing else is pinned: each reusable workflow checks this repo
-out at its own ref (`job.workflow_sha`) and runs the composite action and
-test harness from that checkout. Workflow, action, and harness therefore
-always run at the same commit — whatever `v3` (or a branch, for dispatches)
-resolves to. Never reference the composite action with an `@<ref>` from
-inside this repo; use the local path from the harness checkout.
+Internally, each reusable workflow checks this repo out at its own ref
+(`job.workflow_sha`) and runs the composite actions from that checkout, so
+workflow and actions always run at the same commit — whatever `v3` (or a
+branch, for dispatches) resolves to. Never reference a composite action with
+an `@<ref>` from inside this repo; use the local path from that checkout. The
+test harness is the one exception: it is an npm package, pinned to an exact
+version by the test workflows' `harness_version` default.
 
 ### Which major tag to pin
 
@@ -258,7 +264,7 @@ ship.
 
 ### Cutting a release
 
-1. Merge to `main`. PRs touching `.github/**` or `test-harness/**` run the
+1. Merge to `main`. PRs touching `.github/**` run the
    real pipeline (`ci.yml`: prebuild → emulator test, including the
    floor-API emulator), at the PR's own commit — in-flight changes are what
    execute, so no manual validation dispatch is needed.
@@ -280,8 +286,7 @@ required permissions) get a new major: tag `v4.0.0`, which creates/moves
 their `uses:` references.
 
 To test unreleased changes end-to-end, dispatch `test.yml` from your branch
-in the Actions tab — the whole pipeline (workflows, action, harness) runs at
-the branch's commit.
+in the Actions tab — the workflows and actions run at the branch's commit.
 
 ## Contributing
 

@@ -73,15 +73,13 @@ on:
           equal to `api_level` to skip the second run.
         required: false
         default: 24
-      harness_ref:
+      harness_version:
         type: string
         description: |
-          Optional override for the harness checkout ref. Defaults to the
-          ref this reusable workflow itself is running from
-          (`job.workflow_sha`), so the harness always matches the workflow
-          version.
+          Exact version of the nodejs-mobile-test-harness npm package that
+          builds and runs the test app.
         required: false
-        default: ""
+        default: "1.0.0-pre.2"
       git_repo_slug:
         type: string
         description: |
@@ -103,14 +101,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Must stay above `run-test.sh`'s own TIMEOUT_SECONDS (1200s) plus the
-    # ~4 min of setup/build/boot before it, or the job is cancelled while the
-    # script still believes it has time — taking its diagnosis path (the
-    # `__NODE_EXIT__` sentinel error, the `adb logcat -b crash` dump, the
-    # APP_DIED branch) with it, which is exactly what you need when a run
-    # hangs. A healthy run is ~4 minutes; the emulator itself fails fast via
-    # `emulator-boot-timeout` below, so this only has to bound the test step.
-    timeout-minutes: 30
+    # Must stay above the harness's own timeout (1200s from launch) plus the
+    # setup, build and boot before it (Gradle and the runtime are downloaded
+    # on every run), so a hang ends in the harness's diagnosis (crash log,
+    # missing exit code) rather than a cancelled job.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -156,17 +151,18 @@ jobs:
       - name: Checkout caller repo
         uses: actions/checkout@v7
 
-      - name: Checkout test harness
+      # For the assemble-test-project action, at this workflow's own commit.
+      - name: Checkout nodejs-mobile-bare-prebuilds
         uses: actions/checkout@v7
         with:
           repository: ${{ job.workflow_repository }}
-          ref: ${{ inputs.harness_ref || job.workflow_sha }}
+          ref: ${{ job.workflow_sha }}
           path: .nodejs-mobile-bare-prebuilds
           persist-credentials: false
 
       - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 24
 
       - uses: actions/setup-java@v5
         with:
@@ -181,30 +177,6 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Cache nodejs-mobile android binaries
-        id: cache-libnode
-        uses: actions/cache@v6
-        with:
-          path: .nodejs-mobile-bare-prebuilds/test-harness/android/app/libnode
-          key: libnode-android-${{ inputs.nodejs_mobile_version }}
-
-      - name: Download nodejs-mobile android libraries
-        if: steps.cache-libnode.outputs.cache-hit != 'true'
-        env:
-          NM_VERSION: ${{ inputs.nodejs_mobile_version }}
-        run: |
-          set -euo pipefail
-          harness=.nodejs-mobile-bare-prebuilds/test-harness/android
-          tmp=$(mktemp -d)
-          url="$(.nodejs-mobile-bare-prebuilds/scripts/nodejs-mobile-url.sh "$NM_VERSION" android)"
-          echo "Downloading $url"
-          curl -fL "$url" -o "$tmp/libnode.zip"
-          unzip -q "$tmp/libnode.zip" -d "$tmp/libnode"
-          mkdir -p "$harness/app/libnode"
-          # Zip layout: include/node/*.h, bin/<abi>/libnode.so
-          cp -R "$tmp/libnode/include" "$harness/app/libnode/"
-          cp -R "$tmp/libnode/bin"     "$harness/app/libnode/"
-
       - name: Assemble nodejs-project
         uses: ./.nodejs-mobile-bare-prebuilds/.github/actions/assemble-test-project
         with:
@@ -216,22 +188,27 @@ jobs:
           test_exclude: ${{ inputs.test_exclude }}
           git_repo_slug: ${{ inputs.git_repo_slug }}
           git_ref: ${{ inputs.git_ref }}
-          nodejs_project_dir: .nodejs-mobile-bare-prebuilds/test-harness/android/app/src/main/assets/nodejs-project
+          nodejs_project_dir: ${{ runner.temp }}/nodejs-project
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
-        with:
-          gradle-version: "8.9"
-
+      # The run step below finds this build through the harness's cache under
+      # the working directory, so both run from the workspace root.
       - name: Build APK
-        working-directory: .nodejs-mobile-bare-prebuilds/test-harness/android
         env:
+          HARNESS_VERSION: ${{ inputs.harness_version }}
+          NM_VERSION: ${{ inputs.nodejs_mobile_version }}
           ABI: ${{ steps.inputs.outputs.emulator_arch }}
-        run: gradle -PabiFilter=${ABI} :app:assembleDebug --no-daemon
+          PROJECT_DIR: ${{ runner.temp }}/nodejs-project
+        run: >-
+          npx --yes --package "nodejs-mobile-test-harness@$HARNESS_VERSION"
+          nodejs-mobile-test android "$PROJECT_DIR"
+          --build-only --abi "$ABI" --nodejs-mobile "$NM_VERSION"
 
       # No AVD cache and no snapshot: restoring a snapshot on GitHub-hosted
       # runners wedged the boot (API 24 never re-reported `sys.boot_completed`;
       # API 30 also failed a run). Cold boot costs ~10s and always works.
       - name: Run test on emulator
+        env:
+          HARNESS_VERSION: ${{ inputs.harness_version }}
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: ${{ matrix.api-level }}
@@ -245,7 +222,6 @@ jobs:
           emulator-boot-timeout: 300
           emulator-options: -no-snapshot -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           disable-animations: false
-          # android-emulator-runner runs each LINE of `script:` as a separate
-          # `sh -c` invocation, so variable state and `set` flags don't
-          # persist across lines. Delegate to a committed bash script.
-          script: bash $GITHUB_WORKSPACE/.nodejs-mobile-bare-prebuilds/test-harness/android/run-test.sh
+          # android-emulator-runner runs each line of `script:` as its own
+          # `sh -c`, so this must stay one line.
+          script: npx --yes --package "nodejs-mobile-test-harness@$HARNESS_VERSION" nodejs-mobile-test android --run-only
