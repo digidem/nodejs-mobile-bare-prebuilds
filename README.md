@@ -14,6 +14,7 @@ by the Holepunch team. These modules are built using
 - [Testing prebuilds on an emulator / simulator](#testing-prebuilds-on-an-emulator--simulator)
   - [Running the module's own test suite](#running-the-modules-own-test-suite)
 - [Patching the module before build](#patching-the-module-before-build)
+- [Pinned build toolchain](#pinned-build-toolchain)
 - [Versioning and releasing](#versioning-and-releasing)
 - [Contributing](#contributing)
 - [License](#license)
@@ -235,6 +236,30 @@ unpack and before `npm install`.
 
 To use a different directory name, pass `patches_dir:` to
 `prebuild-all.yml` / `prebuild.yml`.
+
+## Pinned build toolchain
+
+`bare-make` and the CMake packages modules build with (`bare-compat-napi`,
+`cmake-bare`, `cmake-fetch`, `cmake-npm`, and our
+[`cmake-napi` fork](https://github.com/digidem/cmake-napi-nodejs-mobile))
+come from the lockfile in
+[`.github/actions/prebuild/toolchain/`](.github/actions/prebuild/toolchain).
+Before installing the module's dependencies, the action rewrites any of these
+the module declares to the locked version, and adds npm `overrides` so
+transitive copies match. If the module's own range doesn't accept the pinned
+version, the build fails and names the package, so the fix is to bump the pin
+rather than build against an older version without noticing.
+
+Dependabot proposes updates to the pins weekly, and `ci.yml` builds and
+emulator-tests each one before it merges. The `cmake-napi` fork is pinned to a
+commit tarball, so update its URL in `package.json` by hand and run
+`npm install --ignore-scripts` in that directory to refresh the lockfile.
+
+The runner images (and the NDK and Xcode on them) are not pinned this way.
+`canary.yml` runs the whole pipeline on both platforms every Monday and opens
+an issue if anything fails or is cancelled. GitHub disables scheduled
+workflows after 60 days with no activity in the repository, so check it is
+still enabled if the repo has been quiet.
 
 ## Versioning and releasing
 

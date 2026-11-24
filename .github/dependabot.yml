@@ -8,3 +8,19 @@ updates:
       default-days: 3
     schedule:
       interval: weekly
+
+  # Pinned build toolchain for the prebuild action. One PR per package, so a
+  # bad upstream release can't hold up the others; ci.yml builds and
+  # emulator-tests each bump. The cmake-napi fork is a tarball URL at a commit
+  # and is bumped by hand.
+  - package-ecosystem: npm
+    directory: /.github/actions/prebuild/toolchain
+    cooldown:
+      default-days: 3
+    schedule:
+      interval: weekly
+    ignore:
+      # Its js_threadsafe_function_info_t typedef collides with libjstl's
+      # template of the same name.
+      - dependency-name: bare-compat-napi
+        versions: ["1.4.2"]
