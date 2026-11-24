@@ -1,0 +1,14 @@
+{
+  "name": "nodejs-mobile-bare-prebuilds-toolchain",
+  "private": true,
+  "description": "Pinned build toolchain for the prebuild action; Dependabot proposes updates",
+  "dependencies": {
+    "bare-compat-napi": "1.4.1",
+    "bare-make": "2.1.2",
+    "cmake-bare": "1.19.0",
+    "cmake-fetch": "1.5.5",
+    "cmake-napi": "https://codeload.github.com/digidem/cmake-napi-nodejs-mobile/tar.gz/9580e32281ef620fa8797cdb4506215933d50dcd",
+    "cmake-npm": "1.2.0",
+    "semver": "7.8.6"
+  }
+}

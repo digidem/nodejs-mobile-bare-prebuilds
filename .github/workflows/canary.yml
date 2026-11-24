@@ -1,0 +1,75 @@
+name: Canary (weekly pipeline run)
+
+# Runs the full prebuild -> test pipeline on both platforms every week, with
+# a pinned module, so breakage from things still outside the toolchain
+# lockfile (runner images, their NDK and Xcode, retired simulators) shows up
+# within a week, not when a release next needs a rebuild. A failed run opens
+# an issue, or comments on the open one.
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    uses: ./.github/workflows/prebuild.yml
+    with:
+      # Uses libjstl and C++ stdlib headers, so it covers the most of the
+      # build path. Pinned so a module release can't fail the canary.
+      module_name: quickbit-native
+      platform: android
+      arch: x64
+      module_version: "2.4.9"
+
+  test-android:
+    needs: build-android
+    uses: ./.github/workflows/test-android.yml
+    with:
+      module_spec: ${{ needs.build-android.outputs.module_spec }}
+
+  build-ios:
+    uses: ./.github/workflows/prebuild.yml
+    with:
+      module_name: quickbit-native
+      platform: ios
+      arch: arm64
+      simulator: true
+      module_version: "2.4.9"
+
+  test-ios:
+    needs: build-ios
+    uses: ./.github/workflows/test-ios.yml
+    with:
+      module_spec: ${{ needs.build-ios.outputs.module_spec }}
+
+  report:
+    needs: [build-android, test-android, build-ios, test-ios]
+    # A retired runner image shows up as `cancelled`, not `failure`.
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      (contains(needs.*.result, 'failure') ||
+      contains(needs.*.result, 'cancelled'))
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the canary issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          title="Weekly canary run failed"
+          summary=$(jq -r 'to_entries[] | "- \(.key): \(.value.result)"' <<<"$RESULTS")
+          body=$(printf 'Run: %s\n\n%s\n' "$RUN_URL" "$summary")
+          number=$(gh issue list --state open --search "\"$title\" in:title" --json number -q '.[0].number')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --title "$title" --body "$body"
+          fi

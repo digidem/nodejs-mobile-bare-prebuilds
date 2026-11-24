@@ -40,14 +40,6 @@ inputs:
     description: "Node.js version to use"
     required: false
     default: "24"
-  bare_compat_napi_version:
-    description: |
-      Exact bare-compat-napi version to build against, overriding the
-      module's devDependency range. 1.4.2 declares a C typedef
-      `js_threadsafe_function_info_t` that collides with the libjstl
-      template of the same name. Set to "" to use the module's range.
-    required: false
-    default: "1.4.1"
 
 outputs:
   module_version:
@@ -149,9 +141,14 @@ runs:
 
         echo "No patch to apply (no ${MODULE_NAME}+*.patch files in ${PATCHES_DIR}/)."
 
-    - name: Install bare-make
+    # bare-make and the CMake packages modules build with come from the
+    # lockfile in toolchain/, so upstream releases arrive as Dependabot PRs
+    # instead of changing builds between runs.
+    - name: Install build toolchain
       shell: bash
-      run: npm install -g bare-make
+      run: |
+        npm ci --ignore-scripts --no-audit --no-fund --prefix "$GITHUB_ACTION_PATH/toolchain"
+        echo "$GITHUB_ACTION_PATH/toolchain/node_modules/.bin" >> "$GITHUB_PATH"
 
     - name: Install deps for package
       shell: bash
@@ -161,19 +158,9 @@ runs:
       # so no install-time lifecycle script is needed (same as the
       # better-sqlite3 workflow). Defence-in-depth alongside the caller
       # checkout's `persist-credentials: false`.
-      env:
-        BARE_COMPAT_NAPI_VERSION: ${{ inputs.bare_compat_napi_version }}
       run: |
+        node "$GITHUB_ACTION_PATH/toolchain/pin-module-deps.mjs" package.json
         npm install --ignore-scripts
-        # Saved, so the later cmake-napi install does not re-resolve it.
-        if [ -n "$BARE_COMPAT_NAPI_VERSION" ] && jq -e '(.dependencies // {}) + (.devDependencies // {}) | has("bare-compat-napi")' package.json >/dev/null; then
-          npm install --ignore-scripts --save-exact "bare-compat-napi@${BARE_COMPAT_NAPI_VERSION}"
-        fi
-
-    - name: Install patched cmake-napi
-      shell: bash
-      working-directory: ./package
-      run: npm install cmake-napi@github:digidem/cmake-napi-nodejs-mobile
 
     - name: Generate
       shell: bash
