@@ -61,7 +61,7 @@ on:
         type: string
         description: "Name of the iOS Simulator device to boot"
         required: false
-        default: "iPhone 15"
+        default: "iPhone 17"
       harness_version:
         type: string
         description: |
@@ -89,11 +89,12 @@ on:
 
 jobs:
   test:
-    # macos-14 / macos-latest runners are Apple Silicon (arm64); the simulator
-    # runs arm64 code. `target` refers to the runtime install path
-    # (prebuilds/ios-arm64/); the -simulator suffix is added to the artifact
-    # name inside assemble-test-project.
-    runs-on: macos-14
+    # Same image as macos-latest (where the prebuilds build), pinned because
+    # each image ships different simulators; see `simulator_name`. Apple
+    # Silicon, so the simulator runs arm64 code. `target` refers to the
+    # runtime install path (prebuilds/ios-arm64/); the -simulator suffix is
+    # added to the artifact name inside assemble-test-project.
+    runs-on: macos-26
     timeout-minutes: 45
     steps:
       - name: Checkout caller repo
